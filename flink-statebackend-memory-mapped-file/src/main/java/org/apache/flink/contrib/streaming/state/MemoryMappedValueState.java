@@ -22,9 +22,7 @@ import org.apache.flink.api.common.state.State;
 import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.queryablestate.client.state.serialization.KvStateSerializer;
 import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
 import org.apache.flink.runtime.state.internal.InternalValueState;
@@ -44,6 +42,7 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
 
     /**
      * Creates a new {@code MemoryMappedValueState}.
+     *
      * @param namespaceSerializer The serializer for the namespace.
      * @param valueSerializer The serializer for the state.
      * @param defaultValue The default value for the state.
@@ -75,21 +74,24 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
     }
 
     @Override
-    public StateIncrementalVisitor<K, N, V> getStateIncrementalVisitor(int recommendedMaxNumberOfReturnedRecords) {
+    public StateIncrementalVisitor<K, N, V> getStateIncrementalVisitor(
+            int recommendedMaxNumberOfReturnedRecords) {
         return null;
     }
 
     @Override
     public V value() {
         try {
-            byte[] valueBytes = backend.namespaceKeyStateNameToValue.get(getNamespaceKeyStateNameTuple());
+            byte[] valueBytes =
+                    backend.namespaceKeyStateNameToValue.get(getNamespaceKeyStateNameTuple());
             if (valueBytes == null) {
                 return getDefaultValue();
             }
             dataInputView.setBuffer(valueBytes);
             return valueSerializer.deserialize(dataInputView);
         } catch (java.lang.Exception e) {
-            throw new FlinkRuntimeException("Error while retrieving data from Memory Mapped File.", e);
+            throw new FlinkRuntimeException(
+                    "Error while retrieving data from Memory Mapped File.", e);
         }
     }
 
@@ -104,14 +106,18 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
             backend.namespaceKeyStateNameToValue.put(namespaceKeyStateNameTuple, serializedValue);
 
-            backend.namespaceAndStateNameToKeys.getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>()).add(getCurrentKey());
+            backend.namespaceAndStateNameToKeys
+                    .getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>())
+                    .add(getCurrentKey());
             backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
-            backend.stateNamesToKeysAndNamespaces.getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>()).add(namespaceKeyStateNameTuple.f0);
-        }
-        catch (java.lang.Exception e){
+            backend.stateNamesToKeysAndNamespaces
+                    .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
+                    .add(namespaceKeyStateNameTuple.f0);
+        } catch (java.lang.Exception e) {
             throw new FlinkRuntimeException("Error while adding data to Memory Mapped File", e);
         }
     }
+
     @Override
     public byte[] getSerializedValue(
             final byte[] serializedKeyAndNamespace,
@@ -122,19 +128,18 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
 
         String stateName = backend.stateToStateName.get(this);
         V value = this.value();
-        byte [] serializedValue = serializeValue(value, safeValueSerializer);
+        byte[] serializedValue = serializeValue(value, safeValueSerializer);
         return serializedValue;
     }
 
-
-
-
-    public K getCurrentKey() throws Exception{
-//        See getSerializedValue for inspiration
-        byte[] serializedKeyAndNamespace = getSharedKeyNamespaceSerializer().buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
+    public K getCurrentKey() throws Exception {
+        //        See getSerializedValue for inspiration
+        byte[] serializedKeyAndNamespace =
+                getSharedKeyNamespaceSerializer()
+                        .buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
         Tuple2<K, N> keyAndNamespace =
-            KvStateSerializer.deserializeKeyAndNamespace(
-                serializedKeyAndNamespace, getKeySerializer(), getNamespaceSerializer());
+                KvStateSerializer.deserializeKeyAndNamespace(
+                        serializedKeyAndNamespace, getKeySerializer(), getNamespaceSerializer());
         return keyAndNamespace.f0;
     }
 
@@ -142,17 +147,17 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         return backend.stateToStateName.get(this);
     }
 
-    public Tuple2<byte[], String> getNamespaceKeyStateNameTuple() throws Exception{
-        byte[] serializedKeyAndNamespace = getSharedKeyNamespaceSerializer().buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
-        return new Tuple2<byte[], String> (serializedKeyAndNamespace, getStateName());
+    public Tuple2<byte[], String> getNamespaceKeyStateNameTuple() throws Exception {
+        byte[] serializedKeyAndNamespace =
+                getSharedKeyNamespaceSerializer()
+                        .buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
+        return new Tuple2<byte[], String>(serializedKeyAndNamespace, getStateName());
     }
-
 
     @SuppressWarnings("unchecked")
     public static <K, N, NS, SV, S extends State, IS extends S> IS create(
             StateDescriptor<S, SV> stateDesc,
-            RegisteredKeyValueStateBackendMetaInfo<NS, SV>
-                    registerResult,
+            RegisteredKeyValueStateBackendMetaInfo<NS, SV> registerResult,
             TypeSerializer<K> keySerializer,
             MemoryMappedKeyedStateBackend<K> backend) {
         return (IS)
@@ -163,5 +168,4 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
                         stateDesc.getDefaultValue(),
                         backend);
     }
-
 }

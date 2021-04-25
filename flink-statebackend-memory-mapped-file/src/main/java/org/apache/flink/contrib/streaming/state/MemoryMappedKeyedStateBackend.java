@@ -1,7 +1,5 @@
 package org.apache.flink.contrib.streaming.state;
 
-import org.apache.commons.lang3.NotImplementedException;
-
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.State;
@@ -31,12 +29,13 @@ import org.apache.flink.runtime.state.metrics.LatencyTrackingStateConfig;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.apache.flink.util.FlinkRuntimeException;
 
+import net.openhft.chronicle.map.ChronicleMap;
+import org.apache.commons.lang3.NotImplementedException;
+
 import javax.annotation.Nonnull;
 
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-
 import java.util.Map;
 import java.util.Spliterator;
 import java.util.concurrent.RunnableFuture;
@@ -44,10 +43,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import static org.apache.flink.util.Preconditions.checkState;
-
-import net.openhft.chronicle.map.*;
-
+/** An {@link AbstractKeyedStateBackend} that stores its state in a Memory Mapped File. */
 public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
     // Serialized (namespace) + String (StateName) -> HashSet of Keys
     public final ChronicleMap<Tuple2<byte[], String>, HashSet<K>> namespaceAndStateNameToKeys;
@@ -66,39 +62,38 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     // stateName + namespaceString -> State
     public ChronicleMap<String, State> stateNameToState;
 
-//    RegisteredKeyValueStateBackendMetaInfo
+    //    RegisteredKeyValueStateBackendMetaInfo
     private final LinkedHashMap<String, RegisteredKeyValueStateBackendMetaInfo> kvStateInformation;
-
 
     private K currentKey;
 
     private boolean disposed = false;
     /** The key serializer. */
     protected final TypeSerializer<K> keySerializer;
+
     SerializedCompositeKeyBuilder<K> sharedKeyBuilder;
     private static final Map<Class<? extends StateDescriptor>, StateFactory> STATE_FACTORIES =
             Stream.of(
-                    Tuple2.of(
-                            ValueStateDescriptor.class,
-                            (StateFactory) MemoryMappedValueState::create))
+                            Tuple2.of(
+                                    ValueStateDescriptor.class,
+                                    (StateFactory) MemoryMappedValueState::create))
                     .collect(Collectors.toMap(t -> t.f0, t -> t.f1));
 
     private interface StateFactory {
         <K, N, NS, SV, S extends State, IS extends S> IS createState(
                 StateDescriptor<S, SV> stateDesc,
-                RegisteredKeyValueStateBackendMetaInfo<NS, SV>
-                        registerResult,
+                RegisteredKeyValueStateBackendMetaInfo<NS, SV> registerResult,
                 TypeSerializer<K> keySerializer,
                 MemoryMappedKeyedStateBackend<K> backend)
                 throws Exception;
 
-//        <SV, S extends State> Object createState(
-//                StateDescriptor<S, SV> stateDesc,
-//                RegisteredKeyValueStateBackendMetaInfo<N, SV> registerResult,
-//                TypeSerializer<K> keySerializer,
-//                MemoryMappedKeyedStateBackend<K, N> knMemoryMappedKeyedStateBackend) throws Exception;
+        //        <SV, S extends State> Object createState(
+        //                StateDescriptor<S, SV> stateDesc,
+        //                RegisteredKeyValueStateBackendMetaInfo<N, SV> registerResult,
+        //                TypeSerializer<K> keySerializer,
+        //                MemoryMappedKeyedStateBackend<K, N> knMemoryMappedKeyedStateBackend)
+        // throws Exception;
     }
-
 
     public MemoryMappedKeyedStateBackend(
             ClassLoader userCodeClassLoader,
@@ -112,22 +107,22 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             StreamCompressionDecorator keyGroupCompressionDecorator,
             SerializedCompositeKeyBuilder<K> sharedKeyBuilder,
             InternalKeyContext<K> keyContext,
-            ChronicleMap<Tuple2<byte[], String>, HashSet<K>>  namespaceAndStateNameToKeys,
+            ChronicleMap<Tuple2<byte[], String>, HashSet<K>> namespaceAndStateNameToKeys,
             ChronicleMap<Tuple2<byte[], String>, State> namespaceStateNameKeyToState,
             ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces,
             LinkedHashMap<State, String> stateToStateName,
             ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue,
-            ChronicleMap<String, State> stateNameToState){
+            ChronicleMap<String, State> stateNameToState) {
         super(
-            kvStateRegistry,
-            keySerializer,
-            userCodeClassLoader,
-            executionConfig,
-            ttlTimeProvider,
-            latencyTrackingStateConfig,
-            cancelStreamRegistry,
-            keyGroupCompressionDecorator,
-            keyContext);
+                kvStateRegistry,
+                keySerializer,
+                userCodeClassLoader,
+                executionConfig,
+                ttlTimeProvider,
+                latencyTrackingStateConfig,
+                cancelStreamRegistry,
+                keyGroupCompressionDecorator,
+                keyContext);
         this.keySerializer = keySerializer;
         this.namespaceAndStateNameToKeys = namespaceAndStateNameToKeys;
         this.namespaceKeyStateNameToState = namespaceStateNameKeyToState;
@@ -137,7 +132,6 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         this.stateToStateName = stateToStateName;
         this.namespaceKeyStateNameToValue = namespaceKeyStateNameToValue;
         this.stateNameToState = stateNameToState;
-
     }
 
     /** @see KeyedStateBackend */
@@ -146,45 +140,45 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         return keySerializer;
     }
 
-//    public <N> getSerializedNamespaceFromState(String state, N namespace) {
-//        namespace.getClass().getTypeName();
-//    }
+    //    public <N> getSerializedNamespaceFromState(String state, N namespace) {
+    //        namespace.getClass().getTypeName();
+    //    }
 
     @SuppressWarnings("unchecked")
     @Override
     public <N> Stream<K> getKeys(String stateName, N namespace) {
-//        RegisteredKeyValueStateBackendMetaInfo<N, K> registeredKeyValueStateBackendMetaInfo = kvStateInformation.get(state);
+        //        RegisteredKeyValueStateBackendMetaInfo<N, K>
+        // registeredKeyValueStateBackendMetaInfo = kvStateInformation.get(state);
         State s = stateNameToState.get(stateName);
 
         try {
             if (s instanceof AbstractMemoryMappedState) {
-               byte[] serializedNamespace = ((AbstractMemoryMappedState<?, ?, ?>) s).serializeCurrentNamespace();
-                Spliterator<K> keySpliterator = namespaceAndStateNameToKeys
-                        .get(new Tuple2<byte[], String>(serializedNamespace, stateName))
-                        .spliterator();
+                byte[] serializedNamespace =
+                        ((AbstractMemoryMappedState<?, ?, ?>) s).serializeCurrentNamespace();
+                Spliterator<K> keySpliterator =
+                        namespaceAndStateNameToKeys
+                                .get(new Tuple2<byte[], String>(serializedNamespace, stateName))
+                                .spliterator();
 
                 Stream<K> targetStream = StreamSupport.stream(keySpliterator, false);
                 return targetStream;
+            } else {
+                throw new Exception("Shouldn't happen");
             }
-            else {
-                throw new Exception ("Shouldn't happen");
-            }
-        }
-        catch(java.lang.Exception e) {
+        } catch (java.lang.Exception e) {
             HashSet<K> keys = new HashSet<>();
             return StreamSupport.stream(keys.spliterator(), false);
         }
-
     }
 
-//    Each State maps to one namespace
+    //    Each State maps to one namespace
     @Override
     public <N> Stream<Tuple2<K, N>> getKeysAndNamespaces(String stateName) {
-         HashSet<byte[]> serializedNamespaceAndKeyTuples = stateNamesToKeysAndNamespaces
-                .get(stateName);
-         State s = stateNameToState.get(stateName);
+        HashSet<byte[]> serializedNamespaceAndKeyTuples =
+                stateNamesToKeysAndNamespaces.get(stateName);
+        State s = stateNameToState.get(stateName);
 
-         try {
+        try {
             if (s instanceof AbstractMemoryMappedState) {
                 AbstractMemoryMappedState<?, ?, ?> state = (AbstractMemoryMappedState<?, ?, ?>) s;
                 HashSet<Tuple2<K, N>> namespaceAndKeyTuples = new HashSet<>();
@@ -196,16 +190,13 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
 
                 Stream<Tuple2<K, N>> targetStream = StreamSupport.stream(keySpliterator, false);
                 return targetStream;
-            }
-            else {
+            } else {
                 throw new Exception("Should not happen");
             }
-        }
-        catch(java.lang.Exception e) {
+        } catch (java.lang.Exception e) {
             HashSet<Tuple2<K, N>> namespaceAndKeyTuples = new HashSet<>();
             return StreamSupport.stream(namespaceAndKeyTuples.spliterator(), false);
         }
-
     }
 
     @Override
@@ -214,7 +205,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         sharedKeyBuilder.setKeyAndKeyGroup(getCurrentKey(), getCurrentKeyGroupIndex());
     }
 
-//    TODO low priority
+    //    TODO low priority
     @Override
     public void dispose() {
         if (this.disposed) {
@@ -227,7 +218,6 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         this.disposed = true;
     }
 
-
     @Nonnull
     @Override
     public <T extends HeapPriorityQueueElement & PriorityComparable<? super T> & Keyed<?>>
@@ -237,7 +227,6 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         throw new NotImplementedException("TODO");
     }
 
-    
     @Nonnull
     @Override
     public RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot(
@@ -255,7 +244,6 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         throw new NotImplementedException("TODO");
     }
 
-
     @Override
     @Nonnull
     public <N, SV, SEV, S extends State, IS extends S> IS createInternalState(
@@ -272,7 +260,6 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             throw new FlinkRuntimeException(message);
         }
 
-        
         TypeSerializer<SV> stateSerializer = stateDesc.getSerializer();
         RegisteredKeyValueStateBackendMetaInfo<N, SV> newMetaInfo =
                 new RegisteredKeyValueStateBackendMetaInfo<>(
@@ -283,17 +270,19 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
                         StateSnapshotTransformFactory.noTransform());
         kvStateInformation.put(stateDesc.getName(), newMetaInfo);
 
-        RegisteredKeyValueStateBackendMetaInfo<N, SV> registerResult =
-                newMetaInfo;
+        RegisteredKeyValueStateBackendMetaInfo<N, SV> registerResult = newMetaInfo;
 
-        IS is = (IS) stateFactory.createState(stateDesc, registerResult, keySerializer,MemoryMappedKeyedStateBackend.this);
+        IS is =
+                (IS)
+                        stateFactory.createState(
+                                stateDesc,
+                                registerResult,
+                                keySerializer,
+                                MemoryMappedKeyedStateBackend.this);
         stateToStateName.put(is, stateDesc.getName());
         stateNameToState.put(stateDesc.getName(), is);
         return is;
     }
-
-
-
 
     @Override
     public void notifyCheckpointComplete(long completedCheckpointId) throws Exception {
@@ -304,25 +293,27 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
         throw new NotImplementedException("TODO");
     }
+
     @VisibleForTesting
     @Override
     public int numKeyValueStateEntries() {
         int count = kvStateInformation.size();
-//        int count = 0;
+        //        int count = 0;
 
-//        for (RegisteredKeyValueStateBackendMetaInfo metaInfo : kvStateInformation.values()) {
-//            // TODO maybe filterOrTransform only for k/v states
-//            try (RocksIteratorWrapper rocksIterator =
-//                         RocksDBOperationUtils.getRocksIterator(
-//                                 db, metaInfo.columnFamilyHandle, readOptions)) {
-//                rocksIterator.seekToFirst();
-//
-//                while (rocksIterator.isValid()) {
-//                    count++;
-//                    rocksIterator.next();
-//                }
-//            }
-//        }
+        //        for (RegisteredKeyValueStateBackendMetaInfo metaInfo :
+        // kvStateInformation.values()) {
+        //            // TODO maybe filterOrTransform only for k/v states
+        //            try (RocksIteratorWrapper rocksIterator =
+        //                         RocksDBOperationUtils.getRocksIterator(
+        //                                 db, metaInfo.columnFamilyHandle, readOptions)) {
+        //                rocksIterator.seekToFirst();
+        //
+        //                while (rocksIterator.isValid()) {
+        //                    count++;
+        //                    rocksIterator.next();
+        //                }
+        //            }
+        //        }
 
         return count;
     }

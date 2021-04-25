@@ -1,19 +1,13 @@
 package org.apache.flink.contrib.streaming.state;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.configuration.CheckpointingOptions;
-import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.fs.CloseableRegistry;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.execution.Environment;
-import org.apache.flink.runtime.memory.OpaqueMemoryResource;
 import org.apache.flink.runtime.query.TaskKvStateRegistry;
 import org.apache.flink.runtime.state.AbstractKeyedStateBackend;
 import org.apache.flink.runtime.state.AbstractManagedMemoryStateBackend;
@@ -27,44 +21,19 @@ import org.apache.flink.runtime.state.OperatorStateHandle;
 import org.apache.flink.runtime.state.StreamCompressionDecorator;
 import org.apache.flink.runtime.state.metrics.LatencyTrackingStateConfig;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
-import org.apache.flink.util.AbstractID;
-import org.apache.flink.util.DynamicCodeLoadingException;
-import org.apache.flink.util.FileUtils;
-import org.apache.flink.util.FlinkRuntimeException;
-import org.apache.flink.util.Preconditions;
-import org.apache.flink.util.TernaryBoolean;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
-import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.List;
-import java.util.Random;
-import java.util.UUID;
 
-
-import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.apache.flink.util.Preconditions.checkNotNull;
-
-/**
- */
+/** */
 @PublicEvolving
 public class MemoryMappedStateBackend extends AbstractManagedMemoryStateBackend
         implements ConfigurableStateBackend {
 
     /** Creates a new {@code MemoryMappedStateBackend} for storing local state. */
-    public MemoryMappedStateBackend() {
-        
-    }
+    public MemoryMappedStateBackend() {}
 
     /**
      * Private constructor that creates a re-configured copy of the state backend.
@@ -74,11 +43,7 @@ public class MemoryMappedStateBackend extends AbstractManagedMemoryStateBackend
      * @param classLoader The class loader.
      */
     private MemoryMappedStateBackend(
-            MemoryMappedStateBackend original, ReadableConfig config, ClassLoader classLoader) {
-        
-    }
-
-   
+            MemoryMappedStateBackend original, ReadableConfig config, ClassLoader classLoader) {}
 
     // ------------------------------------------------------------------------
     //  Reconfiguration
@@ -96,7 +61,6 @@ public class MemoryMappedStateBackend extends AbstractManagedMemoryStateBackend
     public MemoryMappedStateBackend configure(ReadableConfig config, ClassLoader classLoader) {
         return new MemoryMappedStateBackend(this, config, classLoader);
     }
-
 
     // ------------------------------------------------------------------------
     //  State holding data structures
@@ -157,20 +121,20 @@ public class MemoryMappedStateBackend extends AbstractManagedMemoryStateBackend
 
         MemoryMappedKeyedStateBackendBuilder<K> builder =
                 new MemoryMappedKeyedStateBackendBuilder<>(
-                                operatorIdentifier,
-                                env.getUserCodeClassLoader().asClassLoader(),
-                                kvStateRegistry,
-                                keySerializer,
-                                numberOfKeyGroups,
-                                keyGroupRange,
-                                executionConfig,
-                                localRecoveryConfig,
-                                ttlTimeProvider,
-                                latencyTrackingStateConfig,
-                                metricGroup,
-                                stateHandles,
-                                keyGroupCompressionDecorator,
-                                cancelStreamRegistry);
+                        operatorIdentifier,
+                        env.getUserCodeClassLoader().asClassLoader(),
+                        kvStateRegistry,
+                        keySerializer,
+                        numberOfKeyGroups,
+                        keyGroupRange,
+                        executionConfig,
+                        localRecoveryConfig,
+                        ttlTimeProvider,
+                        latencyTrackingStateConfig,
+                        metricGroup,
+                        stateHandles,
+                        keyGroupCompressionDecorator,
+                        cancelStreamRegistry);
         return builder.build();
     }
 
@@ -182,7 +146,8 @@ public class MemoryMappedStateBackend extends AbstractManagedMemoryStateBackend
             CloseableRegistry cancelStreamRegistry)
             throws Exception {
 
-        // the default for MemoryMappedStateBackend; eventually there can be a operator state backend based on
+        // the default for MemoryMappedStateBackend; eventually there can be a operator state
+        // backend based on
         // Memory Mapped Files, too.
         final boolean asyncSnapshots = true;
         return new DefaultOperatorStateBackendBuilder(
@@ -194,17 +159,13 @@ public class MemoryMappedStateBackend extends AbstractManagedMemoryStateBackend
                 .build();
     }
 
-    
-
     // ------------------------------------------------------------------------
     //  Parameters
     // ------------------------------------------------------------------------
 
-
     // ------------------------------------------------------------------------
     //  utilities
     // ------------------------------------------------------------------------
-
 
     @Override
     public String toString() {

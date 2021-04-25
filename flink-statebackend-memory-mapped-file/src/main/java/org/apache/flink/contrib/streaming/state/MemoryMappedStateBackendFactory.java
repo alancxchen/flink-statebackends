@@ -10,9 +10,8 @@ import org.apache.flink.runtime.state.StateBackendFactory;
 public class MemoryMappedStateBackendFactory
         implements StateBackendFactory<MemoryMappedStateBackend> {
     @Override
-    public MemoryMappedStateBackend createFromConfig(
-            ReadableConfig config, ClassLoader classLoader) throws IllegalConfigurationException {
+    public MemoryMappedStateBackend createFromConfig(ReadableConfig config, ClassLoader classLoader)
+            throws IllegalConfigurationException {
         return new MemoryMappedStateBackend().configure(config, classLoader);
     }
 }
-

@@ -1,7 +1,5 @@
 package org.apache.flink.contrib.streaming.state;
 
-import org.apache.commons.lang3.NotImplementedException;
-
 import org.apache.flink.api.common.state.State;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -13,20 +11,22 @@ import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
 import org.apache.flink.runtime.state.internal.InternalKvState;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.commons.lang3.NotImplementedException;
 
 import java.io.IOException;
 
 /**
  * Base class for {@link State} implementations that store state in a RocksDB database.
  *
- * <p>State is not stored in this class but in the ChronicleMap instance that the
- * {@link MemoryMappedKeyedStateBackend} manages and checkpoints.
+ * <p>State is not stored in this class but in the ChronicleMap instance that the {@link
+ * MemoryMappedKeyedStateBackend} manages and checkpoints.
  *
  * @param <K> The type of the key.
  * @param <N> The type of the namespace.
  * @param <V> The type of values kept internally in state.
  */
-public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvState<K, N, V>, State {
+public abstract class AbstractMemoryMappedState<K, N, V>
+        implements InternalKvState<K, N, V>, State {
 
     /** Serializer for the namespace. */
     final TypeSerializer<N> namespaceSerializer;
@@ -41,12 +41,12 @@ public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvSt
     /** Backend that holds the actual RocksDB instance where we store state. */
     protected MemoryMappedKeyedStateBackend<K> backend;
 
-//    /** The column family of this particular instance of state. */
-//    protected ColumnFamilyHandle columnFamily;
+    //    /** The column family of this particular instance of state. */
+    //    protected ColumnFamilyHandle columnFamily;
 
     protected final V defaultValue;
 
-//    protected final WriteOptions writeOptions;
+    //    protected final WriteOptions writeOptions;
 
     protected final DataOutputSerializer dataOutputView;
 
@@ -87,7 +87,9 @@ public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvSt
     public void clear() {
         try {
             // Get the current Key
-            byte[] serializedKeyAndNamespace = sharedKeyNamespaceSerializer.buildCompositeKeyNamespace(currentNamespace, namespaceSerializer);
+            byte[] serializedKeyAndNamespace =
+                    sharedKeyNamespaceSerializer.buildCompositeKeyNamespace(
+                            currentNamespace, namespaceSerializer);
             Tuple2<K, N> keyAndNamespace =
                     KvStateSerializer.deserializeKeyAndNamespace(
                             serializedKeyAndNamespace, keySerializer, namespaceSerializer);
@@ -95,21 +97,25 @@ public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvSt
             String stateName = backend.stateToStateName.get(this);
 
             // Update Data Structures
-            backend.namespaceAndStateNameToKeys.get(new Tuple2<N, String> (currentNamespace, stateName)).remove(key);
-            backend.namespaceKeyStateNameToState.remove(new Tuple3<N, String, K>(currentNamespace, stateName, key));
-            backend.stateNamesToKeysAndNamespaces.get(stateName).remove(new Tuple2<K,N> (key, currentNamespace));
-        }
-        catch (IOException e){
+            backend.namespaceAndStateNameToKeys
+                    .get(new Tuple2<N, String>(currentNamespace, stateName))
+                    .remove(key);
+            backend.namespaceKeyStateNameToState.remove(
+                    new Tuple3<N, String, K>(currentNamespace, stateName, key));
+            backend.stateNamesToKeysAndNamespaces
+                    .get(stateName)
+                    .remove(new Tuple2<K, N>(key, currentNamespace));
+        } catch (IOException e) {
             throw new NotImplementedException("TODO", e);
         }
-
-
     }
 
-    public Tuple2<K, N> deserializeKeyAndNamespace(byte[] serializedKeyAndNamespace) throws Exception {
+    public Tuple2<K, N> deserializeKeyAndNamespace(byte[] serializedKeyAndNamespace)
+            throws Exception {
         return KvStateSerializer.deserializeKeyAndNamespace(
                 serializedKeyAndNamespace, keySerializer, namespaceSerializer);
     }
+
     @Override
     public void setCurrentNamespace(N namespace) {
         this.currentNamespace = namespace;
@@ -118,6 +124,7 @@ public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvSt
     public N getCurrentNamespace() {
         return currentNamespace;
     }
+
     public SerializedCompositeKeyBuilder<K> getSharedKeyNamespaceSerializer() {
         return sharedKeyNamespaceSerializer;
     }
@@ -134,21 +141,23 @@ public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvSt
     public byte[] serializeValue(V value) throws Exception {
         return serializeValue(value, valueSerializer);
     }
+
     public byte[] serializeValue(V value, TypeSerializer<V> safeValueSerializer) throws Exception {
         safeValueSerializer.serialize(value, dataOutputView);
         return dataOutputView.getCopyOfBuffer();
         //        safeValueSerializer.copy(dataInputView, dataOutputView);
-//        int length = 100;
-//        byte[] serializedValue = new byte[100];
-//        dataInputView.readFully(serializedValue);
-//        return serializedValue
+        //        int length = 100;
+        //        byte[] serializedValue = new byte[100];
+        //        dataInputView.readFully(serializedValue);
+        //        return serializedValue
     }
 
-
-    byte[] serializeCurrentNamespace() throws Exception{
+    byte[] serializeCurrentNamespace() throws Exception {
         return serializeNamespace(currentNamespace, namespaceSerializer);
     }
-    public byte[] serializeNamespace(N namespace, TypeSerializer<N> safeValueSerializer) throws Exception {
+
+    public byte[] serializeNamespace(N namespace, TypeSerializer<N> safeValueSerializer)
+            throws Exception {
         safeValueSerializer.serialize(namespace, dataOutputView);
         return dataOutputView.getCopyOfBuffer();
     }
@@ -156,7 +165,4 @@ public abstract class AbstractMemoryMappedState<K, N, V> implements InternalKvSt
     byte[] getKeyBytes() {
         return serializeCurrentKeyWithGroupAndNamespace();
     }
-
-
-
 }
