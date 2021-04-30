@@ -71,7 +71,6 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
 
     //    /** Path where this configured instance stores its RocksDB database. */
     //    private final File instanceRocksDBPath;
-
     private final MetricGroup metricGroup;
     private static int numKeyedStatesBuilt = 0;
     /** True if incremental checkpointing is enabled. */
@@ -271,7 +270,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                 this.ttlTimeProvider,
                 kvStateInformation,
                 latencyTrackingStateConfig,
-                //                keyGroupPrefixBytes,
+                keyGroupPrefixBytes,
                 cancelStreamRegistryForBackend,
                 this.keyGroupCompressionDecorator,
                 sharedKeyBuilder,

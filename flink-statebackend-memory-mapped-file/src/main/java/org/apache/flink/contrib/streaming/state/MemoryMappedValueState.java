@@ -23,7 +23,10 @@ import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.queryablestate.client.state.serialization.KvStateSerializer;
+import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
 import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
+import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
 import org.apache.flink.runtime.state.internal.InternalValueState;
 import org.apache.flink.util.FlinkRuntimeException;
 
@@ -126,9 +129,27 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             throws Exception {
 
         String stateName = backend.stateToStateName.get(this);
-        V value = this.value();
-        byte[] serializedValue = serializeValue(value, safeValueSerializer);
-        return serializedValue;
+        Tuple2<K, N> keyAndNamespace =
+                KvStateSerializer.deserializeKeyAndNamespace(
+                        serializedKeyAndNamespace, safeKeySerializer, safeNamespaceSerializer);
+        int keyGroup =
+                KeyGroupRangeAssignment.assignToKeyGroup(
+                        keyAndNamespace.f0, backend.getNumberOfKeyGroups());
+        SerializedCompositeKeyBuilder<K> keyBuilder =
+                new SerializedCompositeKeyBuilder<>(
+                        safeKeySerializer, backend.getKeyGroupPrefixBytes(), 32);
+        keyBuilder.setKeyAndKeyGroup(keyAndNamespace.f0, keyGroup);
+        byte[] key = keyBuilder.buildCompositeKeyNamespace(keyAndNamespace.f1, namespaceSerializer);
+
+        dataOutputView.clear();
+        safeValueSerializer.serialize(getDefaultValue(), dataOutputView);
+        byte[] defaultValue = dataOutputView.getCopyOfBuffer();
+
+        byte[] value =
+                backend.namespaceKeyStateNameToValue.getOrDefault(
+                        new Tuple2<byte[], String>(key, stateName), defaultValue);
+
+        return value;
     }
 
     //    public K getCurrentKey() throws Exception {

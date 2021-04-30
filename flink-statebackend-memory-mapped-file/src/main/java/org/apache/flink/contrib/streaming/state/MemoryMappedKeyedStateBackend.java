@@ -64,7 +64,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     private final LinkedHashMap<String, RegisteredKeyValueStateBackendMetaInfo> kvStateInformation;
 
     private K currentKey;
-
+    private int keyGroupPrefixBytes;
     private boolean disposed = false;
     /** The key serializer. */
     protected final TypeSerializer<K> keySerializer;
@@ -94,6 +94,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             TtlTimeProvider ttlTimeProvider,
             LinkedHashMap<String, RegisteredKeyValueStateBackendMetaInfo> kvStateInformation,
             LatencyTrackingStateConfig latencyTrackingStateConfig,
+            int keyGroupPrefixBytes,
             CloseableRegistry cancelStreamRegistry,
             StreamCompressionDecorator keyGroupCompressionDecorator,
             SerializedCompositeKeyBuilder<K> sharedKeyBuilder,
@@ -114,6 +115,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
                 cancelStreamRegistry,
                 keyGroupCompressionDecorator,
                 keyContext);
+        this.keyGroupPrefixBytes = keyGroupPrefixBytes;
         this.keySerializer = keySerializer;
         this.namespaceAndStateNameToKeys = namespaceAndStateNameToKeys;
         this.namespaceKeyStateNameToState = namespaceKeyStateNameToState;
@@ -134,6 +136,9 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     //    public <N> getSerializedNamespaceFromState(String state, N namespace) {
     //        namespace.getClass().getTypeName();
     //    }
+    public int getKeyGroupPrefixBytes() {
+        return keyGroupPrefixBytes;
+    }
 
     @SuppressWarnings("unchecked")
     @Override

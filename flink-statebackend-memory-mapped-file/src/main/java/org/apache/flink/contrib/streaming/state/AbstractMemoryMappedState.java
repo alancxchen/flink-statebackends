@@ -143,6 +143,7 @@ public abstract class AbstractMemoryMappedState<K, N, V>
     }
 
     public byte[] serializeValue(V value, TypeSerializer<V> safeValueSerializer) throws Exception {
+        dataOutputView.clear();
         safeValueSerializer.serialize(value, dataOutputView);
         return dataOutputView.getCopyOfBuffer();
     }
