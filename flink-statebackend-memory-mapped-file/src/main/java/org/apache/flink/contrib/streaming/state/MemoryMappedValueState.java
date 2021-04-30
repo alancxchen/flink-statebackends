@@ -131,12 +131,12 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         return serializedValue;
     }
 
-    public K getCurrentKey() throws Exception {
-        //        See getSerializedValue for inspiration
-        byte[] keyBytes = getSharedKeyNamespaceSerializer().getSerializedKeyBytes();
-        dataInputView.setBuffer(keyBytes);
-        return getKeySerializer().deserialize(dataInputView);
-    }
+    //    public K getCurrentKey() throws Exception {
+    //        //        See getSerializedValue for inspiration
+    //        byte[] keyBytes = getSharedKeyNamespaceSerializer().getSerializedKeyBytes();
+    //        dataInputView.setBuffer(keyBytes);
+    //        return getKeySerializer().deserialize(dataInputView);
+    //    }
 
     public String getStateName() {
         return backend.stateToStateName.get(this);

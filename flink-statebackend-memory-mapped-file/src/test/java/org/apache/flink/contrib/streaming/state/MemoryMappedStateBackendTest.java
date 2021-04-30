@@ -28,11 +28,15 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
+import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.query.KvStateRegistry;
 import org.apache.flink.runtime.state.CheckpointStorage;
+import org.apache.flink.runtime.state.CheckpointStreamFactory;
+import org.apache.flink.runtime.state.CheckpointableKeyedStateBackend;
 import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
+import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.SharedStateRegistry;
 import org.apache.flink.runtime.state.StateBackendTestBase;
 import org.apache.flink.runtime.state.StateHandleID;
@@ -40,15 +44,18 @@ import org.apache.flink.runtime.state.TestLocalRecoveryConfig;
 import org.apache.flink.runtime.state.UncompressedStreamCompressionDecorator;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.runtime.state.internal.InternalKvState;
 import org.apache.flink.runtime.state.metrics.LatencyTrackingStateConfig;
 import org.apache.flink.runtime.state.storage.FileSystemCheckpointStorage;
 import org.apache.flink.runtime.state.storage.JobManagerCheckpointStorage;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.apache.flink.runtime.util.BlockerCheckpointStreamFactory;
+import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.function.SupplierWithException;
 
 import org.apache.commons.io.filefilter.IOFileFilter;
 import org.junit.ClassRule;
+import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -59,6 +66,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.internal.verification.VerificationModeFactory.times;
 
@@ -105,25 +114,6 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
 
     // Store it because we need it for the cleanup test.
     private String dbPath;
-    //    private RocksDB db = null;
-    //    private ColumnFamilyHandle defaultCFHandle = null;
-    //    private final RocksDBResourceContainer optionsContainer = new RocksDBResourceContainer();
-
-    //    public void prepareRocksDB() throws Exception {
-    //        String dbPath = new File(TEMP_FOLDER.newFolder(),
-    // DB_INSTANCE_DIR_STRING).getAbsolutePath();
-    //        ColumnFamilyOptions columnOptions = optionsContainer.getColumnOptions();
-    //
-    //        ArrayList<ColumnFamilyHandle> columnFamilyHandles = new ArrayList<>(1);
-    //        db =
-    //                RocksDBOperationUtils.openDB(
-    //                        dbPath,
-    //                        Collections.emptyList(),
-    //                        columnFamilyHandles,
-    //                        columnOptions,
-    //                        optionsContainer.getDbOptions());
-    //        defaultCFHandle = columnFamilyHandles.remove(0);
-    //    }
 
     @Override
     protected MemoryMappedStateBackend getStateBackend() throws IOException {
@@ -153,24 +143,214 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
         return true;
     }
 
-    // small safety net for instance cleanups, so that no native objects are left
-    //    @After
-    //    public void cleanupRocksDB() {
-    //        if (keyedStateBackend != null) {
-    //            IOUtils.closeQuietly(keyedStateBackend);
-    //            keyedStateBackend.dispose();
-    //        }
-    //        IOUtils.closeQuietly(defaultCFHandle);
-    //        IOUtils.closeQuietly(db);
-    //        IOUtils.closeQuietly(optionsContainer);
-    //
-    //        if (allCreatedCloseables != null) {
-    //            for (RocksObject rocksCloseable : allCreatedCloseables) {
-    //                verify(rocksCloseable, times(1)).close();
-    //            }
-    //            allCreatedCloseables = null;
-    //        }
-    //    }
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testValueState2() throws Exception {
+        CheckpointStreamFactory streamFactory = createStreamFactory();
+        SharedStateRegistry sharedStateRegistry = new SharedStateRegistry();
+
+        ValueStateDescriptor<String> kvId = new ValueStateDescriptor<>("id", String.class);
+
+        TypeSerializer<Integer> keySerializer = IntSerializer.INSTANCE;
+        TypeSerializer<VoidNamespace> namespaceSerializer = VoidNamespaceSerializer.INSTANCE;
+
+        CheckpointableKeyedStateBackend<Integer> backend =
+                createKeyedBackend(IntSerializer.INSTANCE);
+        try {
+            ValueState<String> state =
+                    backend.getPartitionedState(
+                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
+            @SuppressWarnings("unchecked")
+            InternalKvState<Integer, VoidNamespace, String> kvState =
+                    (InternalKvState<Integer, VoidNamespace, String>) state;
+
+            // this is only available after the backend initialized the serializer
+            TypeSerializer<String> valueSerializer = kvId.getSerializer();
+
+            // some modifications to the state
+            backend.setCurrentKey(1);
+            assertNull(state.value());
+            assertNull(
+                    getSerializedValue(
+                            kvState,
+                            1,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            state.update("1");
+            backend.setCurrentKey(2);
+            assertNull(state.value());
+            assertNull(
+                    getSerializedValue(
+                            kvState,
+                            2,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            state.update("2");
+            backend.setCurrentKey(1);
+            assertEquals("1", state.value());
+            assertEquals(
+                    "1",
+                    getSerializedValue(
+                            kvState,
+                            1,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+
+            // draw a snapshot
+            KeyedStateHandle snapshot1 =
+                    runSnapshot(
+                            backend.snapshot(
+                                    682375462378L,
+                                    2,
+                                    streamFactory,
+                                    CheckpointOptions.forCheckpointWithDefaultLocation()),
+                            sharedStateRegistry);
+
+            // make some more modifications
+            backend.setCurrentKey(1);
+            state.update("u1");
+            backend.setCurrentKey(2);
+            state.update("u2");
+            backend.setCurrentKey(3);
+            state.update("u3");
+
+            // draw another snapshot
+            KeyedStateHandle snapshot2 =
+                    runSnapshot(
+                            backend.snapshot(
+                                    682375462379L,
+                                    4,
+                                    streamFactory,
+                                    CheckpointOptions.forCheckpointWithDefaultLocation()),
+                            sharedStateRegistry);
+
+            // validate the original state
+            backend.setCurrentKey(1);
+            assertEquals("u1", state.value());
+            assertEquals(
+                    "u1",
+                    getSerializedValue(
+                            kvState,
+                            1,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            backend.setCurrentKey(2);
+            assertEquals("u2", state.value());
+            assertEquals(
+                    "u2",
+                    getSerializedValue(
+                            kvState,
+                            2,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            backend.setCurrentKey(3);
+            assertEquals("u3", state.value());
+            assertEquals(
+                    "u3",
+                    getSerializedValue(
+                            kvState,
+                            3,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+
+            backend.dispose();
+            backend = restoreKeyedBackend(IntSerializer.INSTANCE, snapshot1);
+
+            snapshot1.discardState();
+
+            ValueState<String> restored1 =
+                    backend.getPartitionedState(
+                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
+            @SuppressWarnings("unchecked")
+            InternalKvState<Integer, VoidNamespace, String> restoredKvState1 =
+                    (InternalKvState<Integer, VoidNamespace, String>) restored1;
+
+            backend.setCurrentKey(1);
+            assertEquals("1", restored1.value());
+            assertEquals(
+                    "1",
+                    getSerializedValue(
+                            restoredKvState1,
+                            1,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            backend.setCurrentKey(2);
+            assertEquals("2", restored1.value());
+            assertEquals(
+                    "2",
+                    getSerializedValue(
+                            restoredKvState1,
+                            2,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+
+            backend.dispose();
+            backend = restoreKeyedBackend(IntSerializer.INSTANCE, snapshot2);
+
+            snapshot2.discardState();
+
+            ValueState<String> restored2 =
+                    backend.getPartitionedState(
+                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
+            @SuppressWarnings("unchecked")
+            InternalKvState<Integer, VoidNamespace, String> restoredKvState2 =
+                    (InternalKvState<Integer, VoidNamespace, String>) restored2;
+
+            backend.setCurrentKey(1);
+            assertEquals("u1", restored2.value());
+            assertEquals(
+                    "u1",
+                    getSerializedValue(
+                            restoredKvState2,
+                            1,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            backend.setCurrentKey(2);
+            assertEquals("u2", restored2.value());
+            assertEquals(
+                    "u2",
+                    getSerializedValue(
+                            restoredKvState2,
+                            2,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+            backend.setCurrentKey(3);
+            assertEquals("u3", restored2.value());
+            assertEquals(
+                    "u3",
+                    getSerializedValue(
+                            restoredKvState2,
+                            3,
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            valueSerializer));
+        } finally {
+            IOUtils.closeQuietly(backend);
+            backend.dispose();
+        }
+    }
+
     public static <K> MemoryMappedKeyedStateBackendBuilder<K> builderForTestDB(
             File instanceBasePath, TypeSerializer<K> keySerializer) {
         return new MemoryMappedKeyedStateBackendBuilder<>(
@@ -190,7 +370,8 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
                 new CloseableRegistry());
     }
 
-    public void setupRocksKeyedStateBackend() throws Exception {
+    @Test
+    public void setupKeyedStateBackend() throws Exception {
 
         blocker = new OneShotLatch();
         waiter = new OneShotLatch();
@@ -221,370 +402,12 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
                         VoidNamespaceSerializer.INSTANCE,
                         new ValueStateDescriptor<>("TestState-2", String.class, ""));
 
-        //        allCreatedCloseables = new ArrayList<>();
-        //
-        //        doAnswer(
-        //                new Answer<Object>() {
-        //
-        //                    @Override
-        //                    public Object answer(InvocationOnMock invocationOnMock)
-        //                            throws Throwable {
-        //                        RocksIterator rocksIterator =
-        //                                spy((RocksIterator) invocationOnMock.callRealMethod());
-        //                        allCreatedCloseables.add(rocksIterator);
-        //                        return rocksIterator;
-        //                    }
-        //                })
-        //                .when(keyedStateBackend.db)
-        //                .newIterator(any(ColumnFamilyHandle.class), any(ReadOptions.class));
-        //
-        //        doAnswer(
-        //                new Answer<Object>() {
-        //
-        //                    @Override
-        //                    public Object answer(InvocationOnMock invocationOnMock)
-        //                            throws Throwable {
-        //                        Snapshot snapshot =
-        //                                spy((Snapshot) invocationOnMock.callRealMethod());
-        //                        allCreatedCloseables.add(snapshot);
-        //                        return snapshot;
-        //                    }
-        //                })
-        //                .when(keyedStateBackend.db)
-        //                .getSnapshot();
-        //
-        //        doAnswer(
-        //                new Answer<Object>() {
-        //
-        //                    @Override
-        //                    public Object answer(InvocationOnMock invocationOnMock)
-        //                            throws Throwable {
-        //                        ColumnFamilyHandle snapshot =
-        //                                spy((ColumnFamilyHandle)
-        // invocationOnMock.callRealMethod());
-        //                        allCreatedCloseables.add(snapshot);
-        //                        return snapshot;
-        //                    }
-        //                })
-        //                .when(keyedStateBackend.db)
-        //                .createColumnFamily(any(ColumnFamilyDescriptor.class));
-
         for (int i = 0; i < 100; ++i) {
             keyedStateBackend.setCurrentKey(i);
             testState1.update(4200 + i);
             testState2.update("S-" + (4200 + i));
         }
     }
-
-    //    @Test
-    //    public void testCorrectMergeOperatorSet() throws Exception {
-    //        prepareRocksDB();
-    //        final ColumnFamilyOptions columnFamilyOptions = spy(new ColumnFamilyOptions());
-    //        RocksDBKeyedStateBackend<Integer> test = null;
-    //
-    //        try {
-    //            test =
-    //                    RocksDBTestUtils.builderForTestDB(
-    //                            TEMP_FOLDER.newFolder(),
-    //                            IntSerializer.INSTANCE,
-    //                            db,
-    //                            defaultCFHandle,
-    //                            columnFamilyOptions)
-    //                            .setEnableIncrementalCheckpointing(enableIncrementalCheckpointing)
-    //                            .build();
-    //
-    //            ValueStateDescriptor<String> stubState1 =
-    //                    new ValueStateDescriptor<>("StubState-1", StringSerializer.INSTANCE);
-    //            test.createInternalState(StringSerializer.INSTANCE, stubState1);
-    //            ValueStateDescriptor<String> stubState2 =
-    //                    new ValueStateDescriptor<>("StubState-2", StringSerializer.INSTANCE);
-    //            test.createInternalState(StringSerializer.INSTANCE, stubState2);
-    //
-    //            // The default CF is pre-created so sum up to 2 times (once for each stub state)
-    //            verify(columnFamilyOptions, Mockito.times(2))
-    //                    .setMergeOperatorName(RocksDBKeyedStateBackend.MERGE_OPERATOR_NAME);
-    //        } finally {
-    //            if (test != null) {
-    //                IOUtils.closeQuietly(test);
-    //                test.dispose();
-    //            }
-    //            columnFamilyOptions.close();
-    //        }
-    //    }
-
-    //    @Test
-    //    public void testReleasingSnapshotAfterBackendClosed() throws Exception {
-    //        setupRocksKeyedStateBackend();
-    //
-    //        try {
-    //            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-    //                    keyedStateBackend.snapshot(
-    //                            0L,
-    //                            0L,
-    //                            testStreamFactory,
-    //                            CheckpointOptions.forCheckpointWithDefaultLocation());
-    //
-    //            RocksDB spyDB = keyedStateBackend.db;
-    //
-    //            if (!enableIncrementalCheckpointing) {
-    //                verify(spyDB, times(1)).getSnapshot();
-    //                verify(spyDB, times(0)).releaseSnapshot(any(Snapshot.class));
-    //            }
-    //
-    //            // Ensure every RocksObjects not closed yet
-    //            for (RocksObject rocksCloseable : allCreatedCloseables) {
-    //                verify(rocksCloseable, times(0)).close();
-    //            }
-    //
-    //            snapshot.cancel(true);
-    //
-    //            this.keyedStateBackend.dispose();
-    //
-    //            verify(spyDB, times(1)).close();
-    //            assertEquals(true, keyedStateBackend.isDisposed());
-    //
-    //            // Ensure every RocksObjects was closed exactly once
-    //            for (RocksObject rocksCloseable : allCreatedCloseables) {
-    //                verify(rocksCloseable, times(1)).close();
-    //            }
-    //
-    //        } finally {
-    //            keyedStateBackend.dispose();
-    //            keyedStateBackend = null;
-    //        }
-    //    }
-    //
-    //    @Test
-    //    public void testDismissingSnapshot() throws Exception {
-    //        setupRocksKeyedStateBackend();
-    //        try {
-    //            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-    //                    keyedStateBackend.snapshot(
-    //                            0L,
-    //                            0L,
-    //                            testStreamFactory,
-    //                            CheckpointOptions.forCheckpointWithDefaultLocation());
-    //            snapshot.cancel(true);
-    //            verifyRocksObjectsReleased();
-    //        } finally {
-    //            this.keyedStateBackend.dispose();
-    //            this.keyedStateBackend = null;
-    //        }
-    //    }
-
-    //    @Test
-    //    public void testDismissingSnapshotNotRunnable() throws Exception {
-    //        setupRocksKeyedStateBackend();
-    //        try {
-    //            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-    //                    keyedStateBackend.snapshot(
-    //                            0L,
-    //                            0L,
-    //                            testStreamFactory,
-    //                            CheckpointOptions.forCheckpointWithDefaultLocation());
-    //            snapshot.cancel(true);
-    //            Thread asyncSnapshotThread = new Thread(snapshot);
-    //            asyncSnapshotThread.start();
-    //            try {
-    //                snapshot.get();
-    //                fail();
-    //            } catch (Exception ignored) {
-    //
-    //            }
-    //            asyncSnapshotThread.join();
-    //            verifyRocksObjectsReleased();
-    //        } finally {
-    //            this.keyedStateBackend.dispose();
-    //            this.keyedStateBackend = null;
-    //        }
-    //    }
-    //
-    //    @Test
-    //    public void testCompletingSnapshot() throws Exception {
-    //        setupRocksKeyedStateBackend();
-    //        try {
-    //            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-    //                    keyedStateBackend.snapshot(
-    //                            0L,
-    //                            0L,
-    //                            testStreamFactory,
-    //                            CheckpointOptions.forCheckpointWithDefaultLocation());
-    //            Thread asyncSnapshotThread = new Thread(snapshot);
-    //            asyncSnapshotThread.start();
-    //            waiter.await(); // wait for snapshot to run
-    //            waiter.reset();
-    //            runStateUpdates();
-    //            blocker.trigger(); // allow checkpointing to start writing
-    //            waiter.await(); // wait for snapshot stream writing to run
-    //
-    //            SnapshotResult<KeyedStateHandle> snapshotResult = snapshot.get();
-    //            KeyedStateHandle keyedStateHandle = snapshotResult.getJobManagerOwnedSnapshot();
-    //            assertNotNull(keyedStateHandle);
-    //            assertTrue(keyedStateHandle.getStateSize() > 0);
-    //            assertEquals(2, keyedStateHandle.getKeyGroupRange().getNumberOfKeyGroups());
-    //
-    //            for (BlockingCheckpointOutputStream stream :
-    // testStreamFactory.getAllCreatedStreams()) {
-    //                assertTrue(stream.isClosed());
-    //            }
-    //
-    //            asyncSnapshotThread.join();
-    //            verifyRocksObjectsReleased();
-    //        } finally {
-    //            this.keyedStateBackend.dispose();
-    //            this.keyedStateBackend = null;
-    //        }
-    //    }
-    //
-    //    @Test
-    //    public void testCancelRunningSnapshot() throws Exception {
-    //        setupRocksKeyedStateBackend();
-    //        try {
-    //            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-    //                    keyedStateBackend.snapshot(
-    //                            0L,
-    //                            0L,
-    //                            testStreamFactory,
-    //                            CheckpointOptions.forCheckpointWithDefaultLocation());
-    //            Thread asyncSnapshotThread = new Thread(snapshot);
-    //            asyncSnapshotThread.start();
-    //            waiter.await(); // wait for snapshot to run
-    //            waiter.reset();
-    //            runStateUpdates();
-    //            snapshot.cancel(true);
-    //            blocker.trigger(); // allow checkpointing to start writing
-    //
-    //            for (BlockingCheckpointOutputStream stream :
-    // testStreamFactory.getAllCreatedStreams()) {
-    //                assertTrue(stream.isClosed());
-    //            }
-    //
-    //            waiter.await(); // wait for snapshot stream writing to run
-    //            try {
-    //                snapshot.get();
-    //                fail();
-    //            } catch (Exception ignored) {
-    //            }
-    //
-    //            asyncSnapshotThread.join();
-    //            verifyRocksObjectsReleased();
-    //        } finally {
-    //            this.keyedStateBackend.dispose();
-    //            this.keyedStateBackend = null;
-    //        }
-    //    }
-    //
-    //    @Test
-    //    public void testDisposeDeletesAllDirectories() throws Exception {
-    //        CheckpointableKeyedStateBackend<Integer> backend =
-    //                createKeyedBackend(IntSerializer.INSTANCE);
-    //        Collection<File> allFilesInDbDir =
-    //                FileUtils.listFilesAndDirs(
-    //                        new File(dbPath), new AcceptAllFilter(), new AcceptAllFilter());
-    //        try {
-    //            ValueStateDescriptor<String> kvId =
-    //                    new ValueStateDescriptor<>("id", String.class, null);
-    //
-    //            kvId.initializeSerializerUnlessSet(new ExecutionConfig());
-    //
-    //            ValueState<String> state =
-    //                    backend.getPartitionedState(
-    //                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
-    //
-    //            backend.setCurrentKey(1);
-    //            state.update("Hello");
-    //
-    //            // more than just the root directory
-    //            assertTrue(allFilesInDbDir.size() > 1);
-    //        } finally {
-    //            IOUtils.closeQuietly(backend);
-    //            backend.dispose();
-    //        }
-    //        allFilesInDbDir =
-    //                FileUtils.listFilesAndDirs(
-    //                        new File(dbPath), new AcceptAllFilter(), new AcceptAllFilter());
-    //
-    //        // just the root directory left
-    //        assertEquals(1, allFilesInDbDir.size());
-    //    }
-    //
-    //    @Test
-    //    public void testSharedIncrementalStateDeRegistration() throws Exception {
-    //        if (enableIncrementalCheckpointing) {
-    //            CheckpointableKeyedStateBackend<Integer> backend =
-    //                    createKeyedBackend(IntSerializer.INSTANCE);
-    //            try {
-    //                ValueStateDescriptor<String> kvId =
-    //                        new ValueStateDescriptor<>("id", String.class, null);
-    //
-    //                kvId.initializeSerializerUnlessSet(new ExecutionConfig());
-    //
-    //                ValueState<String> state =
-    //                        backend.getPartitionedState(
-    //                                VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE,
-    // kvId);
-    //
-    //                Queue<IncrementalRemoteKeyedStateHandle> previousStateHandles = new
-    // LinkedList<>();
-    //                SharedStateRegistry sharedStateRegistry = spy(new SharedStateRegistry());
-    //                for (int checkpointId = 0; checkpointId < 3; ++checkpointId) {
-    //
-    //                    reset(sharedStateRegistry);
-    //
-    //                    backend.setCurrentKey(checkpointId);
-    //                    state.update("Hello-" + checkpointId);
-    //
-    //                    RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-    //                            backend.snapshot(
-    //                                    checkpointId,
-    //                                    checkpointId,
-    //                                    createStreamFactory(),
-    //                                    CheckpointOptions.forCheckpointWithDefaultLocation());
-    //
-    //                    snapshot.run();
-    //
-    //                    SnapshotResult<KeyedStateHandle> snapshotResult = snapshot.get();
-    //
-    //                    IncrementalRemoteKeyedStateHandle stateHandle =
-    //                            (IncrementalRemoteKeyedStateHandle)
-    //                                    snapshotResult.getJobManagerOwnedSnapshot();
-    //
-    //                    Map<StateHandleID, StreamStateHandle> sharedState =
-    //                            new HashMap<>(stateHandle.getSharedState());
-    //
-    //                    stateHandle.registerSharedStates(sharedStateRegistry);
-    //
-    //                    for (Map.Entry<StateHandleID, StreamStateHandle> e :
-    // sharedState.entrySet()) {
-    //                        verify(sharedStateRegistry)
-    //                                .registerReference(
-    //                                        stateHandle.createSharedStateRegistryKeyFromFileName(
-    //                                                e.getKey()),
-    //                                        e.getValue());
-    //                    }
-    //
-    //                    previousStateHandles.add(stateHandle);
-    //                    ((CheckpointListener) backend).notifyCheckpointComplete(checkpointId);
-    //
-    //                    // -----------------------------------------------------------------
-    //
-    //                    if (previousStateHandles.size() > 1) {
-    //                        checkRemove(previousStateHandles.remove(), sharedStateRegistry);
-    //                    }
-    //                }
-    //
-    //                while (!previousStateHandles.isEmpty()) {
-    //
-    //                    reset(sharedStateRegistry);
-    //
-    //                    checkRemove(previousStateHandles.remove(), sharedStateRegistry);
-    //                }
-    //            } finally {
-    //                IOUtils.closeQuietly(backend);
-    //                backend.dispose();
-    //            }
-    //        }
-    //    }
 
     private void checkRemove(IncrementalRemoteKeyedStateHandle remove, SharedStateRegistry registry)
             throws Exception {
@@ -612,25 +435,6 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
         }
     }
 
-    //    private void verifyRocksObjectsReleased() {
-    //        // Ensure every RocksObject was closed exactly once
-    //        for (RocksObject rocksCloseable : allCreatedCloseables) {
-    //            verify(rocksCloseable, times(1)).close();
-    //        }
-    //
-    //        assertNotNull(null, keyedStateBackend.db);
-    //        RocksDB spyDB = keyedStateBackend.db;
-    //
-    //        if (!enableIncrementalCheckpointing) {
-    //            verify(spyDB, times(1)).getSnapshot();
-    //            verify(spyDB, times(1)).releaseSnapshot(any(Snapshot.class));
-    //        }
-    //
-    //        keyedStateBackend.dispose();
-    //        verify(spyDB, times(1)).close();
-    //        assertEquals(true, keyedStateBackend.isDisposed());
-    //    }
-
     private static class AcceptAllFilter implements IOFileFilter {
         @Override
         public boolean accept(File file) {
@@ -643,3 +447,402 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
         }
     }
 }
+
+//        allCreatedCloseables = new ArrayList<>();
+//
+//        doAnswer(
+//                new Answer<Object>() {
+//
+//                    @Override
+//                    public Object answer(InvocationOnMock invocationOnMock)
+//                            throws Throwable {
+//                        RocksIterator rocksIterator =
+//                                spy((RocksIterator) invocationOnMock.callRealMethod());
+//                        allCreatedCloseables.add(rocksIterator);
+//                        return rocksIterator;
+//                    }
+//                })
+//                .when(keyedStateBackend.db)
+//                .newIterator(any(ColumnFamilyHandle.class), any(ReadOptions.class));
+//
+//        doAnswer(
+//                new Answer<Object>() {
+//
+//                    @Override
+//                    public Object answer(InvocationOnMock invocationOnMock)
+//                            throws Throwable {
+//                        Snapshot snapshot =
+//                                spy((Snapshot) invocationOnMock.callRealMethod());
+//                        allCreatedCloseables.add(snapshot);
+//                        return snapshot;
+//                    }
+//                })
+//                .when(keyedStateBackend.db)
+//                .getSnapshot();
+//
+//        doAnswer(
+//                new Answer<Object>() {
+//
+//                    @Override
+//                    public Object answer(InvocationOnMock invocationOnMock)
+//                            throws Throwable {
+//                        ColumnFamilyHandle snapshot =
+//                                spy((ColumnFamilyHandle)
+// invocationOnMock.callRealMethod());
+//                        allCreatedCloseables.add(snapshot);
+//                        return snapshot;
+//                    }
+//                })
+//                .when(keyedStateBackend.db)
+//                .createColumnFamily(any(ColumnFamilyDescriptor.class));
+
+// small safety net for instance cleanups, so that no native objects are left
+//    @After
+//    public void cleanupRocksDB() {
+//        if (keyedStateBackend != null) {
+//            IOUtils.closeQuietly(keyedStateBackend);
+//            keyedStateBackend.dispose();
+//        }
+//        IOUtils.closeQuietly(defaultCFHandle);
+//        IOUtils.closeQuietly(db);
+//        IOUtils.closeQuietly(optionsContainer);
+//
+//        if (allCreatedCloseables != null) {
+//            for (RocksObject rocksCloseable : allCreatedCloseables) {
+//                verify(rocksCloseable, times(1)).close();
+//            }
+//            allCreatedCloseables = null;
+//        }
+//    }
+
+//    private void verifyRocksObjectsReleased() {
+//        // Ensure every RocksObject was closed exactly once
+//        for (RocksObject rocksCloseable : allCreatedCloseables) {
+//            verify(rocksCloseable, times(1)).close();
+//        }
+//
+//        assertNotNull(null, keyedStateBackend.db);
+//        RocksDB spyDB = keyedStateBackend.db;
+//
+//        if (!enableIncrementalCheckpointing) {
+//            verify(spyDB, times(1)).getSnapshot();
+//            verify(spyDB, times(1)).releaseSnapshot(any(Snapshot.class));
+//        }
+//
+//        keyedStateBackend.dispose();
+//        verify(spyDB, times(1)).close();
+//        assertEquals(true, keyedStateBackend.isDisposed());
+//    }
+
+//    @Test
+//    public void testCancelRunningSnapshot() throws Exception {
+//        setupRocksKeyedStateBackend();
+//        try {
+//            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
+//                    keyedStateBackend.snapshot(
+//                            0L,
+//                            0L,
+//                            testStreamFactory,
+//                            CheckpointOptions.forCheckpointWithDefaultLocation());
+//            Thread asyncSnapshotThread = new Thread(snapshot);
+//            asyncSnapshotThread.start();
+//            waiter.await(); // wait for snapshot to run
+//            waiter.reset();
+//            runStateUpdates();
+//            snapshot.cancel(true);
+//            blocker.trigger(); // allow checkpointing to start writing
+//
+//            for (BlockingCheckpointOutputStream stream :
+// testStreamFactory.getAllCreatedStreams()) {
+//                assertTrue(stream.isClosed());
+//            }
+//
+//            waiter.await(); // wait for snapshot stream writing to run
+//            try {
+//                snapshot.get();
+//                fail();
+//            } catch (Exception ignored) {
+//            }
+//
+//            asyncSnapshotThread.join();
+//            verifyRocksObjectsReleased();
+//        } finally {
+//            this.keyedStateBackend.dispose();
+//            this.keyedStateBackend = null;
+//        }
+//    }
+
+//    @Test
+//    public void testCompletingSnapshot() throws Exception {
+//        setupRocksKeyedStateBackend();
+//        try {
+//            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
+//                    keyedStateBackend.snapshot(
+//                            0L,
+//                            0L,
+//                            testStreamFactory,
+//                            CheckpointOptions.forCheckpointWithDefaultLocation());
+//            Thread asyncSnapshotThread = new Thread(snapshot);
+//            asyncSnapshotThread.start();
+//            waiter.await(); // wait for snapshot to run
+//            waiter.reset();
+//            runStateUpdates();
+//            blocker.trigger(); // allow checkpointing to start writing
+//            waiter.await(); // wait for snapshot stream writing to run
+//
+//            SnapshotResult<KeyedStateHandle> snapshotResult = snapshot.get();
+//            KeyedStateHandle keyedStateHandle = snapshotResult.getJobManagerOwnedSnapshot();
+//            assertNotNull(keyedStateHandle);
+//            assertTrue(keyedStateHandle.getStateSize() > 0);
+//            assertEquals(2, keyedStateHandle.getKeyGroupRange().getNumberOfKeyGroups());
+//
+//            for (BlockingCheckpointOutputStream stream :
+// testStreamFactory.getAllCreatedStreams()) {
+//                assertTrue(stream.isClosed());
+//            }
+//
+//            asyncSnapshotThread.join();
+//            verifyRocksObjectsReleased();
+//        } finally {
+//            this.keyedStateBackend.dispose();
+//            this.keyedStateBackend = null;
+//        }
+//    }
+//  //    @Test
+//    //    public void testSharedIncrementalStateDeRegistration() throws Exception {
+//    //        if (enableIncrementalCheckpointing) {
+//    //            CheckpointableKeyedStateBackend<Integer> backend =
+//    //                    createKeyedBackend(IntSerializer.INSTANCE);
+//    //            try {
+//    //                ValueStateDescriptor<String> kvId =
+//    //                        new ValueStateDescriptor<>("id", String.class, null);
+//    //
+//    //                kvId.initializeSerializerUnlessSet(new ExecutionConfig());
+//    //
+//    //                ValueState<String> state =
+//    //                        backend.getPartitionedState(
+//    //                                VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE,
+//    // kvId);
+//    //
+//    //                Queue<IncrementalRemoteKeyedStateHandle> previousStateHandles = new
+//    // LinkedList<>();
+//    //                SharedStateRegistry sharedStateRegistry = spy(new SharedStateRegistry());
+//    //                for (int checkpointId = 0; checkpointId < 3; ++checkpointId) {
+//    //
+//    //                    reset(sharedStateRegistry);
+//    //
+//    //                    backend.setCurrentKey(checkpointId);
+//    //                    state.update("Hello-" + checkpointId);
+//    //
+//    //                    RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
+//    //                            backend.snapshot(
+//    //                                    checkpointId,
+//    //                                    checkpointId,
+//    //                                    createStreamFactory(),
+//    //                                    CheckpointOptions.forCheckpointWithDefaultLocation());
+//    //
+//    //                    snapshot.run();
+//    //
+//    //                    SnapshotResult<KeyedStateHandle> snapshotResult = snapshot.get();
+//    //
+//    //                    IncrementalRemoteKeyedStateHandle stateHandle =
+//    //                            (IncrementalRemoteKeyedStateHandle)
+//    //                                    snapshotResult.getJobManagerOwnedSnapshot();
+//    //
+//    //                    Map<StateHandleID, StreamStateHandle> sharedState =
+//    //                            new HashMap<>(stateHandle.getSharedState());
+//    //
+//    //                    stateHandle.registerSharedStates(sharedStateRegistry);
+//    //
+//    //                    for (Map.Entry<StateHandleID, StreamStateHandle> e :
+//    // sharedState.entrySet()) {
+//    //                        verify(sharedStateRegistry)
+//    //                                .registerReference(
+//    //
+// stateHandle.createSharedStateRegistryKeyFromFileName(
+//    //                                                e.getKey()),
+//    //                                        e.getValue());
+//    //                    }
+//    //
+//    //                    previousStateHandles.add(stateHandle);
+//    //                    ((CheckpointListener) backend).notifyCheckpointComplete(checkpointId);
+//    //
+//    //                    // -----------------------------------------------------------------
+//    //
+//    //                    if (previousStateHandles.size() > 1) {
+//    //                        checkRemove(previousStateHandles.remove(), sharedStateRegistry);
+//    //                    }
+//    //                }
+//    //
+//    //                while (!previousStateHandles.isEmpty()) {
+//    //
+//    //                    reset(sharedStateRegistry);
+//    //
+//    //                    checkRemove(previousStateHandles.remove(), sharedStateRegistry);
+//    //                }
+//    //            } finally {
+//    //                IOUtils.closeQuietly(backend);
+//    //                backend.dispose();
+//    //            }
+//    //        }
+//    //    }
+//
+
+//    @Test
+//    public void testCorrectMergeOperatorSet() throws Exception {
+//        prepareRocksDB();
+//        final ColumnFamilyOptions columnFamilyOptions = spy(new ColumnFamilyOptions());
+//        RocksDBKeyedStateBackend<Integer> test = null;
+//
+//        try {
+//            test =
+//                    RocksDBTestUtils.builderForTestDB(
+//                            TEMP_FOLDER.newFolder(),
+//                            IntSerializer.INSTANCE,
+//                            db,
+//                            defaultCFHandle,
+//                            columnFamilyOptions)
+//                            .setEnableIncrementalCheckpointing(enableIncrementalCheckpointing)
+//                            .build();
+//
+//            ValueStateDescriptor<String> stubState1 =
+//                    new ValueStateDescriptor<>("StubState-1", StringSerializer.INSTANCE);
+//            test.createInternalState(StringSerializer.INSTANCE, stubState1);
+//            ValueStateDescriptor<String> stubState2 =
+//                    new ValueStateDescriptor<>("StubState-2", StringSerializer.INSTANCE);
+//            test.createInternalState(StringSerializer.INSTANCE, stubState2);
+//
+//            // The default CF is pre-created so sum up to 2 times (once for each stub state)
+//            verify(columnFamilyOptions, Mockito.times(2))
+//                    .setMergeOperatorName(RocksDBKeyedStateBackend.MERGE_OPERATOR_NAME);
+//        } finally {
+//            if (test != null) {
+//                IOUtils.closeQuietly(test);
+//                test.dispose();
+//            }
+//            columnFamilyOptions.close();
+//        }
+//    }
+
+//    @Test
+//    public void testReleasingSnapshotAfterBackendClosed() throws Exception {
+//        setupRocksKeyedStateBackend();
+//
+//        try {
+//            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
+//                    keyedStateBackend.snapshot(
+//                            0L,
+//                            0L,
+//                            testStreamFactory,
+//                            CheckpointOptions.forCheckpointWithDefaultLocation());
+//
+//            RocksDB spyDB = keyedStateBackend.db;
+//
+//            if (!enableIncrementalCheckpointing) {
+//                verify(spyDB, times(1)).getSnapshot();
+//                verify(spyDB, times(0)).releaseSnapshot(any(Snapshot.class));
+//            }
+//
+//            // Ensure every RocksObjects not closed yet
+//            for (RocksObject rocksCloseable : allCreatedCloseables) {
+//                verify(rocksCloseable, times(0)).close();
+//            }
+//
+//            snapshot.cancel(true);
+//
+//            this.keyedStateBackend.dispose();
+//
+//            verify(spyDB, times(1)).close();
+//            assertEquals(true, keyedStateBackend.isDisposed());
+//
+//            // Ensure every RocksObjects was closed exactly once
+//            for (RocksObject rocksCloseable : allCreatedCloseables) {
+//                verify(rocksCloseable, times(1)).close();
+//            }
+//
+//        } finally {
+//            keyedStateBackend.dispose();
+//            keyedStateBackend = null;
+//        }
+//    }
+//
+//    @Test
+//    public void testDismissingSnapshot() throws Exception {
+//        setupRocksKeyedStateBackend();
+//        try {
+//            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
+//                    keyedStateBackend.snapshot(
+//                            0L,
+//                            0L,
+//                            testStreamFactory,
+//                            CheckpointOptions.forCheckpointWithDefaultLocation());
+//            snapshot.cancel(true);
+//            verifyRocksObjectsReleased();
+//        } finally {
+//            this.keyedStateBackend.dispose();
+//            this.keyedStateBackend = null;
+//        }
+//    }
+
+//    @Test
+//    public void testDismissingSnapshotNotRunnable() throws Exception {
+//        setupRocksKeyedStateBackend();
+//        try {
+//            RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
+//                    keyedStateBackend.snapshot(
+//                            0L,
+//                            0L,
+//                            testStreamFactory,
+//                            CheckpointOptions.forCheckpointWithDefaultLocation());
+//            snapshot.cancel(true);
+//            Thread asyncSnapshotThread = new Thread(snapshot);
+//            asyncSnapshotThread.start();
+//            try {
+//                snapshot.get();
+//                fail();
+//            } catch (Exception ignored) {
+//
+//            }
+//            asyncSnapshotThread.join();
+//            verifyRocksObjectsReleased();
+//        } finally {
+//            this.keyedStateBackend.dispose();
+//            this.keyedStateBackend = null;
+//        }
+//    }
+//
+
+//    @Test
+//    public void testDisposeDeletesAllDirectories() throws Exception {
+//        CheckpointableKeyedStateBackend<Integer> backend =
+//                createKeyedBackend(IntSerializer.INSTANCE);
+//        Collection<File> allFilesInDbDir =
+//                FileUtils.listFilesAndDirs(
+//                        new File(dbPath), new AcceptAllFilter(), new AcceptAllFilter());
+//        try {
+//            ValueStateDescriptor<String> kvId =
+//                    new ValueStateDescriptor<>("id", String.class, null);
+//
+//            kvId.initializeSerializerUnlessSet(new ExecutionConfig());
+//
+//            ValueState<String> state =
+//                    backend.getPartitionedState(
+//                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
+//
+//            backend.setCurrentKey(1);
+//            state.update("Hello");
+//
+//            // more than just the root directory
+//            assertTrue(allFilesInDbDir.size() > 1);
+//        } finally {
+//            IOUtils.closeQuietly(backend);
+//            backend.dispose();
+//        }
+//        allFilesInDbDir =
+//                FileUtils.listFilesAndDirs(
+//                        new File(dbPath), new AcceptAllFilter(), new AcceptAllFilter());
+//
+//        // just the root directory left
+//        assertEquals(1, allFilesInDbDir.size());
+//    }
+//

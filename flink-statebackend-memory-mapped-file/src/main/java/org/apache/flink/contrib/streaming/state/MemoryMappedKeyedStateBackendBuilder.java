@@ -134,7 +134,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
         // ChronicleMaps
         ChronicleMap<Tuple2<byte[], String>, HashSet<K>> namespaceAndStateNameToKeys;
 
-        ChronicleMap<Tuple2<byte[], String>, State> namespaceStateNameKeyToState;
+        LinkedHashMap<Tuple2<byte[], String>, State> namespaceStateNameKeyToState;
         ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces;
         LinkedHashMap<State, String> stateToStateName;
         ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue;
@@ -151,7 +151,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
              * */
             String[] fileNames = {
                 "/namespaceAndStateNameToKeys",
-                "/namespaceStateNameKeyToState",
+                //                "/namespaceStateNameKeyToState",
                 "/stateNamesToKeysAndNamespaces",
                 "/namespaceKeyStateNameToValue",
                 //                "/stateNameToState"
@@ -163,7 +163,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                 files[i] =
                         new File(
                                 OS.getTarget()
-                                        + "BackendChronicleMaps/"
+                                        + "/BackendChronicleMaps/"
                                         + fileNames[i]
                                         + "/"
                                         + fileNames[i]
@@ -198,16 +198,17 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                             .averageValueSize(averageValueSizes[count])
                             .entries(50_000)
                             .createPersistedTo(files[count++]);
-
-            namespaceStateNameKeyToState =
-                    ChronicleMapBuilder.of(
-                                    (Class<Tuple2<byte[], String>>) byteArrayStringTuple.getClass(),
-                                    State.class)
-                            .name("name-state_name-key-to-state-map")
-                            .averageKey(byteArrayStringTuple)
-                            .averageValueSize(averageValueSizes[count])
-                            .entries(50_000)
-                            .createPersistedTo(files[count++]);
+            namespaceStateNameKeyToState = new LinkedHashMap<>();
+            //            namespaceStateNameKey ToState =
+            //                    ChronicleMapBuilder.of(
+            //                                    (Class<Tuple2<byte[], String>>)
+            // byteArrayStringTuple.getClass(),
+            //                                    State.class)
+            //                            .name("name-state_name-key-to-state-map")
+            //                            .averageKey(byteArrayStringTuple)
+            //                            .averageValueSize(averageValueSizes[count])
+            //                            .entries(50_000)
+            //                            .createPersistedTo(files[count++]);
 
             stateNamesToKeysAndNamespaces =
                     ChronicleMapBuilder.of(

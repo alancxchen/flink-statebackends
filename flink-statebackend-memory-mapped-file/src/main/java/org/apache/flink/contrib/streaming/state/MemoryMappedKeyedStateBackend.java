@@ -37,18 +37,16 @@ import javax.annotation.Nonnull;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Spliterator;
 import java.util.concurrent.RunnableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 /** An {@link AbstractKeyedStateBackend} that stores its state in a Memory Mapped File. */
 public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
     // Serialized (namespace) + String (StateName) -> HashSet of Keys
     public final ChronicleMap<Tuple2<byte[], String>, HashSet<K>> namespaceAndStateNameToKeys;
     // Serialized (namespace+Key) + String(StateName) -> State
-    public final ChronicleMap<Tuple2<byte[], String>, State> namespaceKeyStateNameToState;
+    public final LinkedHashMap<Tuple2<byte[], String>, State> namespaceKeyStateNameToState;
 
     // String(StateName) -> HashSet of Serialized (keys + namespaces)
     public final ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces;
@@ -101,7 +99,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             SerializedCompositeKeyBuilder<K> sharedKeyBuilder,
             InternalKeyContext<K> keyContext,
             ChronicleMap<Tuple2<byte[], String>, HashSet<K>> namespaceAndStateNameToKeys,
-            ChronicleMap<Tuple2<byte[], String>, State> namespaceStateNameKeyToState,
+            LinkedHashMap<Tuple2<byte[], String>, State> namespaceKeyStateNameToState,
             ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces,
             LinkedHashMap<State, String> stateToStateName,
             ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue,
@@ -118,7 +116,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
                 keyContext);
         this.keySerializer = keySerializer;
         this.namespaceAndStateNameToKeys = namespaceAndStateNameToKeys;
-        this.namespaceKeyStateNameToState = namespaceStateNameKeyToState;
+        this.namespaceKeyStateNameToState = namespaceKeyStateNameToState;
         this.stateNamesToKeysAndNamespaces = stateNamesToKeysAndNamespaces;
         this.kvStateInformation = kvStateInformation;
         this.sharedKeyBuilder = sharedKeyBuilder;
@@ -140,56 +138,61 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     @SuppressWarnings("unchecked")
     @Override
     public <N> Stream<K> getKeys(String stateName, N namespace) {
-        //        RegisteredKeyValueStateBackendMetaInfo<N, K>
-        // registeredKeyValueStateBackendMetaInfo = kvStateInformation.get(state);
-        State s = stateNameToState.get(stateName);
-
-        try {
-            if (s instanceof AbstractMemoryMappedState) {
-                byte[] serializedNamespace =
-                        ((AbstractMemoryMappedState<?, ?, ?>) s).serializeCurrentNamespace();
-                Spliterator<K> keySpliterator =
-                        namespaceAndStateNameToKeys
-                                .get(new Tuple2<byte[], String>(serializedNamespace, stateName))
-                                .spliterator();
-
-                Stream<K> targetStream = StreamSupport.stream(keySpliterator, false);
-                return targetStream;
-            } else {
-                throw new Exception("Shouldn't happen");
-            }
-        } catch (java.lang.Exception e) {
-            HashSet<K> keys = new HashSet<>();
-            return StreamSupport.stream(keys.spliterator(), false);
-        }
+        throw new NotImplementedException("getKeys");
+        //        State s = stateNameToState.get(stateName);
+        //
+        //        try {
+        //            if (s instanceof AbstractMemoryMappedState) {
+        //                byte[] serializedNamespace =
+        //                        ((AbstractMemoryMappedState<?, ?, ?>)
+        // s).serializeCurrentNamespace();
+        //                Spliterator<K> keySpliterator =
+        //                        namespaceAndStateNameToKeys
+        //                                .get(new Tuple2<byte[], String>(serializedNamespace,
+        // stateName))
+        //                                .spliterator();
+        //
+        //                Stream<K> targetStream = StreamSupport.stream(keySpliterator, false);
+        //                return targetStream;
+        //            } else {
+        //                throw new Exception("Shouldn't happen");
+        //            }
+        //        } catch (java.lang.Exception e) {
+        //            HashSet<K> keys = new HashSet<>();
+        //            return StreamSupport.stream(keys.spliterator(), false);
+        //        }
     }
 
     //    Each State maps to one namespace
     @Override
     public <N> Stream<Tuple2<K, N>> getKeysAndNamespaces(String stateName) {
-        HashSet<byte[]> serializedNamespaceAndKeyTuples =
-                stateNamesToKeysAndNamespaces.get(stateName);
-        State s = stateNameToState.get(stateName);
-
-        try {
-            if (s instanceof AbstractMemoryMappedState) {
-                AbstractMemoryMappedState<?, ?, ?> state = (AbstractMemoryMappedState<?, ?, ?>) s;
-                HashSet<Tuple2<K, N>> namespaceAndKeyTuples = new HashSet<>();
-                for (byte[] b : serializedNamespaceAndKeyTuples) {
-                    Tuple2<K, N> tup = (Tuple2<K, N>) state.deserializeKeyAndNamespace(b);
-                    namespaceAndKeyTuples.add(tup);
-                }
-                Spliterator<Tuple2<K, N>> keySpliterator = namespaceAndKeyTuples.spliterator();
-
-                Stream<Tuple2<K, N>> targetStream = StreamSupport.stream(keySpliterator, false);
-                return targetStream;
-            } else {
-                throw new Exception("Should not happen");
-            }
-        } catch (java.lang.Exception e) {
-            HashSet<Tuple2<K, N>> namespaceAndKeyTuples = new HashSet<>();
-            return StreamSupport.stream(namespaceAndKeyTuples.spliterator(), false);
-        }
+        throw new NotImplementedException("GetKeysAndNamespaces");
+        //        HashSet<byte[]> serializedNamespaceAndKeyTuples =
+        //                stateNamesToKeysAndNamespaces.get(stateName);
+        //        State s = stateNameToState.get(stateName);
+        //
+        //        try {
+        //            if (s instanceof AbstractMemoryMappedState) {
+        //                AbstractMemoryMappedState<?, ?, ?> state = (AbstractMemoryMappedState<?,
+        // ?, ?>) s;
+        //                HashSet<Tuple2<K, N>> namespaceAndKeyTuples = new HashSet<>();
+        //                for (byte[] b : serializedNamespaceAndKeyTuples) {
+        //                    Tuple2<K, N> tup = (Tuple2<K, N>) state.deserializeKeyAndNamespace(b);
+        //                    namespaceAndKeyTuples.add(tup);
+        //                }
+        //                Spliterator<Tuple2<K, N>> keySpliterator =
+        // namespaceAndKeyTuples.spliterator();
+        //
+        //                Stream<Tuple2<K, N>> targetStream = StreamSupport.stream(keySpliterator,
+        // false);
+        //                return targetStream;
+        //            } else {
+        //                throw new Exception("Should not happen");
+        //            }
+        //        } catch (java.lang.Exception e) {
+        //            HashSet<Tuple2<K, N>> namespaceAndKeyTuples = new HashSet<>();
+        //            return StreamSupport.stream(namespaceAndKeyTuples.spliterator(), false);
+        //        }
     }
 
     @Override
@@ -207,7 +210,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         }
         super.dispose();
         namespaceAndStateNameToKeys.close();
-        namespaceKeyStateNameToState.close();
+        //        namespaceKeyStateNameToState.close();
         stateNamesToKeysAndNamespaces.close();
         this.disposed = true;
     }
