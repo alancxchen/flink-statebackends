@@ -73,7 +73,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
     //    private final File instanceRocksDBPath;
 
     private final MetricGroup metricGroup;
-
+    private static int numKeyedStatesBuilt = 0;
     /** True if incremental checkpointing is enabled. */
     private boolean enableIncrementalCheckpointing;
 
@@ -108,6 +108,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                 cancelStreamRegistry);
 
         this.operatorIdentifier = operatorIdentifier;
+        this.numKeyedStatesBuilt += 1;
         //        this.instanceBasePath = instanceBasePath;
         //        this.instanceRocksDBPath = new File(instanceBasePath, DB_INSTANCE_DIR_STRING);
         this.metricGroup = metricGroup;
@@ -137,7 +138,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
         ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces;
         LinkedHashMap<State, String> stateToStateName;
         ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue;
-        ChronicleMap<String, State> stateNameToState;
+        LinkedHashMap<String, State> stateNameToState;
         try {
             sharedKeyBuilder =
                     new SerializedCompositeKeyBuilder<>(
@@ -148,12 +149,45 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
             /*
              * Creating all the Chronicle Maps
              * */
+            String[] fileNames = {
+                "/namespaceAndStateNameToKeys",
+                "/namespaceStateNameKeyToState",
+                "/stateNamesToKeysAndNamespaces",
+                "/namespaceKeyStateNameToValue",
+                //                "/stateNameToState"
+            };
+            int[] averageValueSizes = {50, 500, 500, 5, 500};
+
+            File[] files = new File[fileNames.length];
+            for (int i = 0; i < fileNames.length; i++) {
+                files[i] =
+                        new File(
+                                OS.getTarget()
+                                        + "BackendChronicleMaps/"
+                                        + fileNames[i]
+                                        + "/"
+                                        + fileNames[i]
+                                        + "_"
+                                        + Integer.toString(this.numKeyedStatesBuilt)
+                                        + ".dat");
+
+                files[i].getParentFile().mkdirs();
+                files[i].delete();
+                files[i].createNewFile();
+                //                if (files[i].createNewFile()) {
+                ////                    System.out.println("File Created" + files[i].getName());
+                //                } else {
+                //                    System.out.println(("File already Exists"));
+                //                }
+            }
+
             Tuple2<byte[], String> byteArrayStringTuple =
                     new Tuple2<byte[], String>("Any String you want".getBytes(), "123");
             HashSet<K> keyHashSet = new HashSet<K>();
             byte[] byteArray = "Any String you want".getBytes();
             HashSet<byte[]> byteHashSet = new HashSet<byte[]>();
 
+            int count = 0;
             // !!! Does this way of opening files work
             namespaceAndStateNameToKeys =
                     ChronicleMapBuilder.of(
@@ -161,9 +195,9 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                                     (Class<HashSet<K>>) keyHashSet.getClass())
                             .name("name-and-state-name-to-keys-map")
                             .averageKey(byteArrayStringTuple)
+                            .averageValueSize(averageValueSizes[count])
                             .entries(50_000)
-                            .createPersistedTo(
-                                    new File(OS.getTarget() + "/namespaceAndStateNameToKeys.dat"));
+                            .createPersistedTo(files[count++]);
 
             namespaceStateNameKeyToState =
                     ChronicleMapBuilder.of(
@@ -171,19 +205,18 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                                     State.class)
                             .name("name-state_name-key-to-state-map")
                             .averageKey(byteArrayStringTuple)
+                            .averageValueSize(averageValueSizes[count])
                             .entries(50_000)
-                            .createPersistedTo(
-                                    new File(OS.getTarget() + "/namespaceStateNameKeyToState.dat"));
+                            .createPersistedTo(files[count++]);
 
             stateNamesToKeysAndNamespaces =
                     ChronicleMapBuilder.of(
                                     String.class, (Class<HashSet<byte[]>>) byteHashSet.getClass())
                             .name("state_name-to-keys-and-namespaces-map")
                             .averageKey("Any String you want")
+                            .averageValueSize(averageValueSizes[count])
                             .entries(50_000)
-                            .createPersistedTo(
-                                    new File(
-                                            OS.getTarget() + "/stateNamesToKeysAndNamespaces.dat"));
+                            .createPersistedTo(files[count++]);
 
             stateToStateName = new LinkedHashMap<State, String>();
 
@@ -193,16 +226,17 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                                     byte[].class)
                             .name("name-and-state-to-keys-map")
                             .averageKey(byteArrayStringTuple)
+                            .averageValueSize(averageValueSizes[count])
                             .entries(50_000)
-                            .createPersistedTo(
-                                    new File(OS.getTarget() + "/namespaceKeyStateNameToValue.dat"));
-
-            stateNameToState =
-                    ChronicleMapBuilder.of(String.class, State.class)
-                            .name("state_name-to-state-map")
-                            .averageKey("Any String you want")
-                            .entries(50_000)
-                            .createPersistedTo(new File(OS.getTarget() + "/stateNameToState.dat"));
+                            .createPersistedTo(files[count++]);
+            stateNameToState = new LinkedHashMap<String, State>();
+            //            stateNameToState =
+            //                    ChronicleMapBuilder.of(String.class, State.class)
+            //                            .name("state_name-to-state-map")
+            //                            .averageKey("Any String you want")
+            //                            .averageValueSize(averageValueSizes[count])
+            //                            .entries(50_000)
+            //                            .createPersistedTo(files[count++]);
 
         } catch (Throwable e) {
             // Do clean up
@@ -218,7 +252,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
             if (e instanceof BackendBuildingException) {
                 throw (BackendBuildingException) e;
             } else {
-                String errMsg = "Caught unexpected exception.";
+                String errMsg = "Caught unexpected exception." + OS.getTarget();
                 logger.error(errMsg, e);
                 throw new BackendBuildingException(errMsg, e);
             }

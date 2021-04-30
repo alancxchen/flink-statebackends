@@ -60,7 +60,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     public LinkedHashMap<State, String> stateToStateName;
 
     // stateName + namespaceString -> State
-    public ChronicleMap<String, State> stateNameToState;
+    public LinkedHashMap<String, State> stateNameToState;
 
     //    RegisteredKeyValueStateBackendMetaInfo
     private final LinkedHashMap<String, RegisteredKeyValueStateBackendMetaInfo> kvStateInformation;
@@ -86,13 +86,6 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
                 TypeSerializer<K> keySerializer,
                 MemoryMappedKeyedStateBackend<K> backend)
                 throws Exception;
-
-        //        <SV, S extends State> Object createState(
-        //                StateDescriptor<S, SV> stateDesc,
-        //                RegisteredKeyValueStateBackendMetaInfo<N, SV> registerResult,
-        //                TypeSerializer<K> keySerializer,
-        //                MemoryMappedKeyedStateBackend<K, N> knMemoryMappedKeyedStateBackend)
-        // throws Exception;
     }
 
     public MemoryMappedKeyedStateBackend(
@@ -112,7 +105,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces,
             LinkedHashMap<State, String> stateToStateName,
             ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue,
-            ChronicleMap<String, State> stateNameToState) {
+            LinkedHashMap<String, State> stateNameToState) {
         super(
                 kvStateRegistry,
                 keySerializer,
@@ -203,6 +196,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     public void setCurrentKey(K newKey) {
         super.setCurrentKey(newKey);
         sharedKeyBuilder.setKeyAndKeyGroup(getCurrentKey(), getCurrentKeyGroupIndex());
+        //        namespaceAndStateNameToKeys.put(getCurrentKey(), )
     }
 
     //    TODO low priority

@@ -23,7 +23,6 @@ import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.queryablestate.client.state.serialization.KvStateSerializer;
 import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
 import org.apache.flink.runtime.state.internal.InternalValueState;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -106,9 +105,9 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
             backend.namespaceKeyStateNameToValue.put(namespaceKeyStateNameTuple, serializedValue);
 
-            backend.namespaceAndStateNameToKeys
-                    .getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>())
-                    .add(getCurrentKey());
+            //            backend.namespaceAndStateNameToKeys
+            //                    .getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>())
+            //                    .add(getCurrentKey());
             backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
             backend.stateNamesToKeysAndNamespaces
                     .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
@@ -134,13 +133,9 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
 
     public K getCurrentKey() throws Exception {
         //        See getSerializedValue for inspiration
-        byte[] serializedKeyAndNamespace =
-                getSharedKeyNamespaceSerializer()
-                        .buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
-        Tuple2<K, N> keyAndNamespace =
-                KvStateSerializer.deserializeKeyAndNamespace(
-                        serializedKeyAndNamespace, getKeySerializer(), getNamespaceSerializer());
-        return keyAndNamespace.f0;
+        byte[] keyBytes = getSharedKeyNamespaceSerializer().getSerializedKeyBytes();
+        dataInputView.setBuffer(keyBytes);
+        return getKeySerializer().deserialize(dataInputView);
     }
 
     public String getStateName() {

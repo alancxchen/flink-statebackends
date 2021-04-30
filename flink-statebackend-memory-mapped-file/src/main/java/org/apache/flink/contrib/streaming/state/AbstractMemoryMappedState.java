@@ -145,11 +145,6 @@ public abstract class AbstractMemoryMappedState<K, N, V>
     public byte[] serializeValue(V value, TypeSerializer<V> safeValueSerializer) throws Exception {
         safeValueSerializer.serialize(value, dataOutputView);
         return dataOutputView.getCopyOfBuffer();
-        //        safeValueSerializer.copy(dataInputView, dataOutputView);
-        //        int length = 100;
-        //        byte[] serializedValue = new byte[100];
-        //        dataInputView.readFully(serializedValue);
-        //        return serializedValue
     }
 
     byte[] serializeCurrentNamespace() throws Exception {
@@ -158,6 +153,7 @@ public abstract class AbstractMemoryMappedState<K, N, V>
 
     public byte[] serializeNamespace(N namespace, TypeSerializer<N> safeValueSerializer)
             throws Exception {
+        dataOutputView.clear();
         safeValueSerializer.serialize(namespace, dataOutputView);
         return dataOutputView.getCopyOfBuffer();
     }
