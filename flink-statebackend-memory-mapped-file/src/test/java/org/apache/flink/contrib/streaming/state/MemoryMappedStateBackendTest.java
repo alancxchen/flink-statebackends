@@ -28,7 +28,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
-import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.query.KvStateRegistry;
 import org.apache.flink.runtime.state.CheckpointStorage;
@@ -36,7 +35,6 @@ import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.CheckpointableKeyedStateBackend;
 import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
-import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.SharedStateRegistry;
 import org.apache.flink.runtime.state.StateBackendTestBase;
 import org.apache.flink.runtime.state.StateHandleID;
@@ -202,16 +200,6 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
                             namespaceSerializer,
                             valueSerializer));
 
-            // draw a snapshot
-            KeyedStateHandle snapshot1 =
-                    runSnapshot(
-                            backend.snapshot(
-                                    682375462378L,
-                                    2,
-                                    streamFactory,
-                                    CheckpointOptions.forCheckpointWithDefaultLocation()),
-                            sharedStateRegistry);
-
             // make some more modifications
             backend.setCurrentKey(1);
             state.update("u1");
@@ -219,16 +207,6 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
             state.update("u2");
             backend.setCurrentKey(3);
             state.update("u3");
-
-            // draw another snapshot
-            KeyedStateHandle snapshot2 =
-                    runSnapshot(
-                            backend.snapshot(
-                                    682375462379L,
-                                    4,
-                                    streamFactory,
-                                    CheckpointOptions.forCheckpointWithDefaultLocation()),
-                            sharedStateRegistry);
 
             // validate the original state
             backend.setCurrentKey(1);
@@ -266,85 +244,7 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
                             valueSerializer));
 
             backend.dispose();
-            backend = restoreKeyedBackend(IntSerializer.INSTANCE, snapshot1);
 
-            snapshot1.discardState();
-
-            ValueState<String> restored1 =
-                    backend.getPartitionedState(
-                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
-            @SuppressWarnings("unchecked")
-            InternalKvState<Integer, VoidNamespace, String> restoredKvState1 =
-                    (InternalKvState<Integer, VoidNamespace, String>) restored1;
-
-            backend.setCurrentKey(1);
-            assertEquals("1", restored1.value());
-            assertEquals(
-                    "1",
-                    getSerializedValue(
-                            restoredKvState1,
-                            1,
-                            keySerializer,
-                            VoidNamespace.INSTANCE,
-                            namespaceSerializer,
-                            valueSerializer));
-            backend.setCurrentKey(2);
-            assertEquals("2", restored1.value());
-            assertEquals(
-                    "2",
-                    getSerializedValue(
-                            restoredKvState1,
-                            2,
-                            keySerializer,
-                            VoidNamespace.INSTANCE,
-                            namespaceSerializer,
-                            valueSerializer));
-
-            backend.dispose();
-            backend = restoreKeyedBackend(IntSerializer.INSTANCE, snapshot2);
-
-            snapshot2.discardState();
-
-            ValueState<String> restored2 =
-                    backend.getPartitionedState(
-                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
-            @SuppressWarnings("unchecked")
-            InternalKvState<Integer, VoidNamespace, String> restoredKvState2 =
-                    (InternalKvState<Integer, VoidNamespace, String>) restored2;
-
-            backend.setCurrentKey(1);
-            assertEquals("u1", restored2.value());
-            assertEquals(
-                    "u1",
-                    getSerializedValue(
-                            restoredKvState2,
-                            1,
-                            keySerializer,
-                            VoidNamespace.INSTANCE,
-                            namespaceSerializer,
-                            valueSerializer));
-            backend.setCurrentKey(2);
-            assertEquals("u2", restored2.value());
-            assertEquals(
-                    "u2",
-                    getSerializedValue(
-                            restoredKvState2,
-                            2,
-                            keySerializer,
-                            VoidNamespace.INSTANCE,
-                            namespaceSerializer,
-                            valueSerializer));
-            backend.setCurrentKey(3);
-            assertEquals("u3", restored2.value());
-            assertEquals(
-                    "u3",
-                    getSerializedValue(
-                            restoredKvState2,
-                            3,
-                            keySerializer,
-                            VoidNamespace.INSTANCE,
-                            namespaceSerializer,
-                            valueSerializer));
         } finally {
             IOUtils.closeQuietly(backend);
             backend.dispose();
