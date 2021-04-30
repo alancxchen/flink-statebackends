@@ -37,9 +37,11 @@ import javax.annotation.Nonnull;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Spliterator;
 import java.util.concurrent.RunnableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /** An {@link AbstractKeyedStateBackend} that stores its state in a Memory Mapped File. */
 public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
@@ -143,29 +145,27 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     @SuppressWarnings("unchecked")
     @Override
     public <N> Stream<K> getKeys(String stateName, N namespace) {
-        throw new NotImplementedException("getKeys");
-        //        State s = stateNameToState.get(stateName);
-        //
-        //        try {
-        //            if (s instanceof AbstractMemoryMappedState) {
-        //                byte[] serializedNamespace =
-        //                        ((AbstractMemoryMappedState<?, ?, ?>)
-        // s).serializeCurrentNamespace();
-        //                Spliterator<K> keySpliterator =
-        //                        namespaceAndStateNameToKeys
-        //                                .get(new Tuple2<byte[], String>(serializedNamespace,
-        // stateName))
-        //                                .spliterator();
-        //
-        //                Stream<K> targetStream = StreamSupport.stream(keySpliterator, false);
-        //                return targetStream;
-        //            } else {
-        //                throw new Exception("Shouldn't happen");
-        //            }
-        //        } catch (java.lang.Exception e) {
-        //            HashSet<K> keys = new HashSet<>();
-        //            return StreamSupport.stream(keys.spliterator(), false);
-        //        }
+        //        throw new NotImplementedException("getKeys");
+        State s = stateNameToState.get(stateName);
+
+        try {
+            if (s instanceof AbstractMemoryMappedState) {
+                byte[] serializedNamespace =
+                        ((AbstractMemoryMappedState<?, ?, ?>) s).serializeCurrentNamespace();
+                Spliterator<K> keySpliterator =
+                        namespaceAndStateNameToKeys
+                                .get(new Tuple2<byte[], String>(serializedNamespace, stateName))
+                                .spliterator();
+
+                Stream<K> targetStream = StreamSupport.stream(keySpliterator, false);
+                return targetStream;
+            } else {
+                throw new Exception("Shouldn't happen");
+            }
+        } catch (java.lang.Exception e) {
+            HashSet<K> keys = new HashSet<>();
+            return StreamSupport.stream(keys.spliterator(), false);
+        }
     }
 
     //    Each State maps to one namespace

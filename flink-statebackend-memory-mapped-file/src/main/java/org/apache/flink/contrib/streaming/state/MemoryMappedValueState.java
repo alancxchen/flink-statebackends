@@ -108,9 +108,9 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
             backend.namespaceKeyStateNameToValue.put(namespaceKeyStateNameTuple, serializedValue);
 
-            //            backend.namespaceAndStateNameToKeys
-            //                    .getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>())
-            //                    .add(getCurrentKey());
+            backend.namespaceAndStateNameToKeys
+                    .getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>())
+                    .add(backend.getCurrentKey());
             backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
             backend.stateNamesToKeysAndNamespaces
                     .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())

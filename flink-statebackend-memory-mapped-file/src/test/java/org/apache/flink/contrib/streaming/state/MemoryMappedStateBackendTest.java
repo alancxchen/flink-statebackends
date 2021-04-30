@@ -24,19 +24,21 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.IntSerializer;
+import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
+import org.apache.flink.queryablestate.client.state.serialization.KvStateSerializer;
+import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
+import org.apache.flink.runtime.operators.testutils.MockEnvironment;
 import org.apache.flink.runtime.query.KvStateRegistry;
 import org.apache.flink.runtime.state.CheckpointStorage;
-import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.CheckpointableKeyedStateBackend;
 import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.SharedStateRegistry;
-import org.apache.flink.runtime.state.StateBackendTestBase;
 import org.apache.flink.runtime.state.StateHandleID;
 import org.apache.flink.runtime.state.TestLocalRecoveryConfig;
 import org.apache.flink.runtime.state.UncompressedStreamCompressionDecorator;
@@ -49,9 +51,12 @@ import org.apache.flink.runtime.state.storage.JobManagerCheckpointStorage;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.apache.flink.runtime.util.BlockerCheckpointStreamFactory;
 import org.apache.flink.util.IOUtils;
+import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.function.SupplierWithException;
 
 import org.apache.commons.io.filefilter.IOFileFilter;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -63,15 +68,19 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.PrimitiveIterator;
+import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.internal.verification.VerificationModeFactory.times;
 
 /** Tests for the partitioned state part of {@link MemoryMappedStateBackend}. */
 @RunWith(Parameterized.class)
-public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMappedStateBackend> {
+public class MemoryMappedStateBackendTest extends TestLogger {
 
     private OneShotLatch blocker;
     private OneShotLatch waiter;
@@ -112,8 +121,51 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
 
     // Store it because we need it for the cleanup test.
     private String dbPath;
+    private MockEnvironment env;
 
-    @Override
+    private MockEnvironment buildMockEnv() {
+        return MockEnvironment.builder().build();
+    }
+
+    @Before
+    public void before() {
+        env = buildMockEnv();
+    }
+
+    @After
+    public void after() {
+        IOUtils.closeQuietly(env);
+    }
+
+    /** Returns the value by getting the serialized value and deserializing it if it is not null. */
+    protected static <V, K, N> V getSerializedValue(
+            InternalKvState<K, N, V> kvState,
+            K key,
+            TypeSerializer<K> keySerializer,
+            N namespace,
+            TypeSerializer<N> namespaceSerializer,
+            TypeSerializer<V> valueSerializer)
+            throws Exception {
+
+        byte[] serializedKeyAndNamespace =
+                KvStateSerializer.serializeKeyAndNamespace(
+                        key, keySerializer, namespace, namespaceSerializer);
+
+        byte[] serializedValue =
+                kvState.getSerializedValue(
+                        serializedKeyAndNamespace,
+                        kvState.getKeySerializer(),
+                        kvState.getNamespaceSerializer(),
+                        kvState.getValueSerializer());
+
+        if (serializedValue == null) {
+            return null;
+        } else {
+            return KvStateSerializer.deserializeValue(serializedValue, valueSerializer);
+        }
+    }
+
+    //    @Override
     protected MemoryMappedStateBackend getStateBackend() throws IOException {
         dbPath = TEMP_FOLDER.newFolder().getAbsolutePath();
         MemoryMappedStateBackend backend = new MemoryMappedStateBackend();
@@ -126,17 +178,52 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
         return backend;
     }
 
-    @Override
+    protected <K> CheckpointableKeyedStateBackend<K> createKeyedBackend(
+            TypeSerializer<K> keySerializer) throws Exception {
+        return createKeyedBackend(keySerializer, env);
+    }
+
+    protected <K> CheckpointableKeyedStateBackend<K> createKeyedBackend(
+            TypeSerializer<K> keySerializer, Environment env) throws Exception {
+        return createKeyedBackend(keySerializer, 10, new KeyGroupRange(0, 9), env);
+    }
+
+    protected <K> CheckpointableKeyedStateBackend<K> createKeyedBackend(
+            TypeSerializer<K> keySerializer,
+            int numberOfKeyGroups,
+            KeyGroupRange keyGroupRange,
+            Environment env)
+            throws Exception {
+
+        CheckpointableKeyedStateBackend<K> backend =
+                getStateBackend()
+                        .createKeyedStateBackend(
+                                env,
+                                new JobID(),
+                                "test_op",
+                                keySerializer,
+                                numberOfKeyGroups,
+                                keyGroupRange,
+                                env.getTaskKvStateRegistry(),
+                                TtlTimeProvider.DEFAULT,
+                                new UnregisteredMetricsGroup(),
+                                Collections.emptyList(),
+                                new CloseableRegistry());
+
+        return backend;
+    }
+
+    //    @Override
     protected CheckpointStorage getCheckpointStorage() throws Exception {
         return storageSupplier.get();
     }
 
-    @Override
+    //    @Override
     protected boolean isSerializerPresenceRequiredOnRestore() {
         return false;
     }
 
-    @Override
+    //    @Override
     protected boolean supportsAsynchronousSnapshots() {
         return true;
     }
@@ -144,7 +231,7 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
     @Test
     @SuppressWarnings("unchecked")
     public void testValueState2() throws Exception {
-        CheckpointStreamFactory streamFactory = createStreamFactory();
+        //        CheckpointStreamFactory streamFactory = createStreamFactory();
         SharedStateRegistry sharedStateRegistry = new SharedStateRegistry();
 
         ValueStateDescriptor<String> kvId = new ValueStateDescriptor<>("id", String.class);
@@ -242,9 +329,86 @@ public class MemoryMappedStateBackendTest extends StateBackendTestBase<MemoryMap
                             VoidNamespace.INSTANCE,
                             namespaceSerializer,
                             valueSerializer));
+            // Added for testing volume
+            for (int i = 0; i < 100; i++) {
+                backend.setCurrentKey(i);
+                state.update(Integer.toString(i));
+            }
+
+            for (int i = 70; i > 0; i--) {
+                backend.setCurrentKey(i);
+                assertEquals(Integer.toString(i), state.value());
+            }
 
             backend.dispose();
 
+        } finally {
+            IOUtils.closeQuietly(backend);
+            backend.dispose();
+        }
+    }
+
+    @Test
+    public void testGetKeys() throws Exception {
+        final int namespace1ElementsNum = 1000;
+        final int namespace2ElementsNum = 1000;
+        String fieldName = "get-keys-test";
+        CheckpointableKeyedStateBackend<Integer> backend =
+                createKeyedBackend(IntSerializer.INSTANCE);
+        try {
+            final String ns1 = "ns1";
+            ValueState<Integer> keyedState1 =
+                    backend.getPartitionedState(
+                            ns1,
+                            StringSerializer.INSTANCE,
+                            new ValueStateDescriptor<>(fieldName, IntSerializer.INSTANCE));
+
+            for (int key = 0; key < namespace1ElementsNum; key++) {
+                backend.setCurrentKey(key);
+                keyedState1.update(key * 2);
+            }
+
+            final String ns2 = "ns2";
+            ValueState<Integer> keyedState2 =
+                    backend.getPartitionedState(
+                            ns2,
+                            StringSerializer.INSTANCE,
+                            new ValueStateDescriptor<>(fieldName, IntSerializer.INSTANCE));
+
+            for (int key = namespace1ElementsNum;
+                    key < namespace1ElementsNum + namespace2ElementsNum;
+                    key++) {
+                backend.setCurrentKey(key);
+                keyedState2.update(key * 2);
+            }
+
+            // valid for namespace1
+            try (Stream<Integer> keysStream = backend.getKeys(fieldName, ns1).sorted()) {
+                PrimitiveIterator.OfInt actualIterator =
+                        keysStream.mapToInt(value -> value.intValue()).iterator();
+
+                for (int expectedKey = 0; expectedKey < namespace1ElementsNum; expectedKey++) {
+                    assertTrue(actualIterator.hasNext());
+                    assertEquals(expectedKey, actualIterator.nextInt());
+                }
+
+                assertFalse(actualIterator.hasNext());
+            }
+
+            // valid for namespace2
+            try (Stream<Integer> keysStream = backend.getKeys(fieldName, ns2).sorted()) {
+                PrimitiveIterator.OfInt actualIterator =
+                        keysStream.mapToInt(value -> value.intValue()).iterator();
+
+                for (int expectedKey = namespace1ElementsNum;
+                        expectedKey < namespace1ElementsNum + namespace2ElementsNum;
+                        expectedKey++) {
+                    assertTrue(actualIterator.hasNext());
+                    assertEquals(expectedKey, actualIterator.nextInt());
+                }
+
+                assertFalse(actualIterator.hasNext());
+            }
         } finally {
             IOUtils.closeQuietly(backend);
             backend.dispose();
