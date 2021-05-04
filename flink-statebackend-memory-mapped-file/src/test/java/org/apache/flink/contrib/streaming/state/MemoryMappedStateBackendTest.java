@@ -383,6 +383,7 @@ public class MemoryMappedStateBackendTest extends TestLogger {
             }
 
             // valid for namespace1
+            //            System.out.println(backend.getKeys(fieldName, ns1));
             try (Stream<Integer> keysStream = backend.getKeys(fieldName, ns1).sorted()) {
                 PrimitiveIterator.OfInt actualIterator =
                         keysStream.mapToInt(value -> value.intValue()).iterator();

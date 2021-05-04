@@ -32,6 +32,7 @@ import net.openhft.chronicle.map.ChronicleMapBuilder;
 import javax.annotation.Nonnull;
 
 import java.io.File;
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -131,10 +132,10 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                         numberOfKeyGroups);
 
         // ChronicleMaps
-        ChronicleMap<Tuple2<byte[], String>, HashSet<K>> namespaceAndStateNameToKeys;
+        LinkedHashMap<Tuple2<ByteBuffer, String>, HashSet<K>> namespaceAndStateNameToKeys;
 
         LinkedHashMap<Tuple2<byte[], String>, State> namespaceStateNameKeyToState;
-        ChronicleMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces;
+        LinkedHashMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces;
         LinkedHashMap<State, String> stateToStateName;
         ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue;
         LinkedHashMap<String, State> stateNameToState;
@@ -149,9 +150,9 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
              * Creating all the Chronicle Maps
              * */
             String[] fileNames = {
-                "/namespaceAndStateNameToKeys",
+                //                "/namespaceAndStateNameToKeys",
                 //                "/namespaceStateNameKeyToState",
-                "/stateNamesToKeysAndNamespaces",
+                //                "/stateNamesToKeysAndNamespaces",
                 "/namespaceKeyStateNameToValue",
                 //                "/stateNameToState"
             };
@@ -188,15 +189,17 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
 
             int count = 0;
             // !!! Does this way of opening files work
-            namespaceAndStateNameToKeys =
-                    ChronicleMapBuilder.of(
-                                    (Class<Tuple2<byte[], String>>) byteArrayStringTuple.getClass(),
-                                    (Class<HashSet<K>>) keyHashSet.getClass())
-                            .name("name-and-state-name-to-keys-map")
-                            .averageKey(byteArrayStringTuple)
-                            .averageValueSize(averageValueSizes[count])
-                            .entries(50_000)
-                            .createPersistedTo(files[count++]);
+            //            namespaceAndStateNameToKeys =
+            //                    ChronicleMapBuilder.of(
+            //                                    (Class<Tuple2<byte[], String>>)
+            // byteArrayStringTuple.getClass(),
+            //                                    (Class<HashSet<K>>) keyHashSet.getClass())
+            //                            .name("name-and-state-name-to-keys-map")
+            //                            .averageKey(byteArrayStringTuple)
+            //                            .averageValueSize(averageValueSizes[count])
+            //                            .entries(50_000)
+            //                            .createPersistedTo(files[count++]);
+            namespaceAndStateNameToKeys = new LinkedHashMap<>();
             namespaceStateNameKeyToState = new LinkedHashMap<>();
             //            namespaceStateNameKey ToState =
             //                    ChronicleMapBuilder.of(
@@ -209,14 +212,15 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
             //                            .entries(50_000)
             //                            .createPersistedTo(files[count++]);
 
-            stateNamesToKeysAndNamespaces =
-                    ChronicleMapBuilder.of(
-                                    String.class, (Class<HashSet<byte[]>>) byteHashSet.getClass())
-                            .name("state_name-to-keys-and-namespaces-map")
-                            .averageKey("Any String you want")
-                            .averageValueSize(averageValueSizes[count])
-                            .entries(50_000)
-                            .createPersistedTo(files[count++]);
+            stateNamesToKeysAndNamespaces = new LinkedHashMap<>();
+            //                    ChronicleMapBuilder.of(
+            //                                    String.class, (Class<HashSet<byte[]>>)
+            // byteHashSet.getClass())
+            //                            .name("state_name-to-keys-and-namespaces-map")
+            //                            .averageKey("Any String you want")
+            //                            .averageValueSize(averageValueSizes[count])
+            //                            .entries(50_000)
+            //                            .createPersistedTo(files[count++]);
 
             stateToStateName = new LinkedHashMap<State, String>();
 

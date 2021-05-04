@@ -30,6 +30,7 @@ import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
 import org.apache.flink.runtime.state.internal.InternalValueState;
 import org.apache.flink.util.FlinkRuntimeException;
 
+import java.nio.ByteBuffer;
 import java.util.HashSet;
 
 /**
@@ -108,9 +109,21 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
             backend.namespaceKeyStateNameToValue.put(namespaceKeyStateNameTuple, serializedValue);
 
-            backend.namespaceAndStateNameToKeys
-                    .getOrDefault(namespaceKeyStateNameTuple, new HashSet<K>())
-                    .add(backend.getCurrentKey());
+            //            Fixed bug where we were using the wrong tuple to update the keys
+            byte[] currentNamespace = serializeCurrentNamespace();
+            Tuple2<byte[], String> namespaceStatenameTuple =
+                    new Tuple2(currentNamespace, getStateName());
+
+            Tuple2<ByteBuffer, String> tupleForKeys =
+                    new Tuple2(ByteBuffer.wrap(currentNamespace), getStateName());
+            HashSet<K> keyHash =
+                    backend.namespaceAndStateNameToKeys.getOrDefault(
+                            tupleForKeys, new HashSet<K>());
+            keyHash.add(backend.getCurrentKey());
+            //            Trying out ByteBuffer
+
+            backend.namespaceAndStateNameToKeys.put(tupleForKeys, keyHash);
+
             backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
             backend.stateNamesToKeysAndNamespaces
                     .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
