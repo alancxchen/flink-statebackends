@@ -86,7 +86,7 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
     public V value() {
         try {
             byte[] valueBytes =
-                    backend.namespaceKeyStateNameToValue.get(getNamespaceKeyStateNameTuple());
+                    backend.namespaceKeyStatenameToValue.get(getNamespaceKeyStateNameTuple());
             if (valueBytes == null) {
                 return getDefaultValue();
             }
@@ -107,7 +107,7 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         try {
             byte[] serializedValue = serializeValue(value, valueSerializer);
             Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
-            backend.namespaceKeyStateNameToValue.put(namespaceKeyStateNameTuple, serializedValue);
+            backend.namespaceKeyStatenameToValue.put(namespaceKeyStateNameTuple, serializedValue);
 
             //            Fixed bug where we were using the wrong tuple to update the keys
             byte[] currentNamespace = serializeCurrentNamespace();
@@ -156,7 +156,7 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         byte[] defaultValue = dataOutputView.getCopyOfBuffer();
 
         byte[] value =
-                backend.namespaceKeyStateNameToValue.getOrDefault(
+                backend.namespaceKeyStatenameToValue.getOrDefault(
                         new Tuple2<byte[], String>(key, stateName), defaultValue);
 
         return value;
@@ -168,17 +168,6 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
     //        dataInputView.setBuffer(keyBytes);
     //        return getKeySerializer().deserialize(dataInputView);
     //    }
-
-    public String getStateName() {
-        return backend.stateToStateName.get(this);
-    }
-
-    public Tuple2<byte[], String> getNamespaceKeyStateNameTuple() throws Exception {
-        byte[] serializedKeyAndNamespace =
-                getSharedKeyNamespaceSerializer()
-                        .buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
-        return new Tuple2<byte[], String>(serializedKeyAndNamespace, getStateName());
-    }
 
     @SuppressWarnings("unchecked")
     public static <K, N, NS, SV, S extends State, IS extends S> IS create(

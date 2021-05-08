@@ -159,6 +159,17 @@ public abstract class AbstractMemoryMappedState<K, N, V>
         return dataOutputView.getCopyOfBuffer();
     }
 
+    public Tuple2<byte[], String> getNamespaceKeyStateNameTuple() throws Exception {
+        byte[] serializedKeyAndNamespace =
+                getSharedKeyNamespaceSerializer()
+                        .buildCompositeKeyNamespace(getCurrentNamespace(), namespaceSerializer);
+        return new Tuple2<byte[], String>(serializedKeyAndNamespace, getStateName());
+    }
+
+    public String getStateName() {
+        return backend.stateToStateName.get(this);
+    }
+
     byte[] getKeyBytes() {
         return serializeCurrentKeyWithGroupAndNamespace();
     }

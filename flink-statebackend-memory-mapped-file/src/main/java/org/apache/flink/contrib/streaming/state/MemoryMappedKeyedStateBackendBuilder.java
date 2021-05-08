@@ -66,6 +66,7 @@ import java.util.LinkedHashMap;
 public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateBackendBuilder<K> {
     /** String that identifies the operator that owns this backend. */
     private final String operatorIdentifier;
+
     private final MetricGroup metricGroup;
     private static int numKeyedStatesBuilt = 0;
     /** True if incremental checkpointing is enabled. */
@@ -162,7 +163,6 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                 files[i].getParentFile().mkdirs();
                 files[i].delete();
                 files[i].createNewFile();
-
             }
             DataOutputSerializer dataOutput = new DataOutputSerializer(32);
             LongSerializer l = new LongSerializer();

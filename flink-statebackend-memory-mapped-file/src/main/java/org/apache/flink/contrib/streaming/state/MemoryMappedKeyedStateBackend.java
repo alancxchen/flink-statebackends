@@ -58,7 +58,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     public final LinkedHashMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces;
 
     // Serialized (namespace + Key) + StateName -> Serialized (Value)
-    public final ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue;
+    public final ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStatenameToValue;
 
     // State -> StateName
     public LinkedHashMap<State, String> stateToStateName;
@@ -129,7 +129,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         this.kvStateInformation = kvStateInformation;
         this.sharedKeyBuilder = sharedKeyBuilder;
         this.stateToStateName = stateToStateName;
-        this.namespaceKeyStateNameToValue = namespaceKeyStateNameToValue;
+        this.namespaceKeyStatenameToValue = namespaceKeyStateNameToValue;
         this.stateNameToState = stateNameToState;
     }
 
