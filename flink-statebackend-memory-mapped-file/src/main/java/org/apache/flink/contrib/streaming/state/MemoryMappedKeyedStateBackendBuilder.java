@@ -183,7 +183,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                             .name("name-and-state-to-keys-map")
                             .averageKey(averageKey)
                             .averageValueSize(averageValueSizes[count])
-                            .entries(10_000_000)
+                            .entries(1_000_000)
                             .createPersistedTo(files[count++]);
             stateNameToState = new LinkedHashMap<String, State>();
 
