@@ -162,13 +162,6 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         return value;
     }
 
-    //    public K getCurrentKey() throws Exception {
-    //        //        See getSerializedValue for inspiration
-    //        byte[] keyBytes = getSharedKeyNamespaceSerializer().getSerializedKeyBytes();
-    //        dataInputView.setBuffer(keyBytes);
-    //        return getKeySerializer().deserialize(dataInputView);
-    //    }
-
     @SuppressWarnings("unchecked")
     public static <K, N, NS, SV, S extends State, IS extends S> IS create(
             StateDescriptor<S, SV> stateDesc,

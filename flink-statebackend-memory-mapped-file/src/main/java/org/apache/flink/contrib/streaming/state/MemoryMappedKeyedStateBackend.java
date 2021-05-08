@@ -2,6 +2,7 @@ package org.apache.flink.contrib.streaming.state;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.State;
 import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
@@ -80,7 +81,10 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             Stream.of(
                             Tuple2.of(
                                     ValueStateDescriptor.class,
-                                    (StateFactory) MemoryMappedValueState::create))
+                                    (StateFactory) MemoryMappedValueState::create),
+                    Tuple2.of(
+                            MapStateDescriptor.class,
+                            (StateFactory) MemoryMappedMapState::create))
                     .collect(Collectors.toMap(t -> t.f0, t -> t.f1));
 
     private interface StateFactory {
@@ -109,7 +113,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             LinkedHashMap<Tuple2<byte[], String>, State> namespaceKeyStateNameToState,
             LinkedHashMap<String, HashSet<byte[]>> stateNamesToKeysAndNamespaces,
             LinkedHashMap<State, String> stateToStateName,
-            ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStateNameToValue,
+            ChronicleMap<Tuple2<byte[], String>, byte[]> namespaceKeyStatenameToValue,
             LinkedHashMap<String, State> stateNameToState) {
         super(
                 kvStateRegistry,
@@ -129,7 +133,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
         this.kvStateInformation = kvStateInformation;
         this.sharedKeyBuilder = sharedKeyBuilder;
         this.stateToStateName = stateToStateName;
-        this.namespaceKeyStatenameToValue = namespaceKeyStateNameToValue;
+        this.namespaceKeyStatenameToValue = namespaceKeyStatenameToValue;
         this.stateNameToState = stateNameToState;
     }
 
