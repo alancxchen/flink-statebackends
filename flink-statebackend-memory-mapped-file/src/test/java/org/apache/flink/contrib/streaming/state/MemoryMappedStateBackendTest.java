@@ -20,6 +20,8 @@ package org.apache.flink.contrib.streaming.state;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
@@ -54,6 +56,7 @@ import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.function.SupplierWithException;
 
+import junit.framework.TestCase;
 import org.apache.commons.io.filefilter.IOFileFilter;
 import org.junit.After;
 import org.junit.Before;
@@ -65,9 +68,12 @@ import org.junit.runners.Parameterized;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.PrimitiveIterator;
 import java.util.stream.Stream;
 
@@ -208,7 +214,7 @@ public class MemoryMappedStateBackendTest extends TestLogger {
         return backend;
     }
 
-    @Test
+    //    @Test
     @SuppressWarnings("unchecked")
     public void testValueState2() throws Exception {
         //        CheckpointStreamFactory streamFactory = createStreamFactory();
@@ -328,7 +334,7 @@ public class MemoryMappedStateBackendTest extends TestLogger {
         }
     }
 
-    @Test
+    //    @Test
     public void testGetKeys() throws Exception {
         final int namespace1ElementsNum = 500000;
         final int namespace2ElementsNum = 1000;
@@ -393,6 +399,210 @@ public class MemoryMappedStateBackendTest extends TestLogger {
         } finally {
             IOUtils.closeQuietly(backend);
             backend.dispose();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked,rawtypes")
+    public void testMapState() throws Exception {
+        //        CheckpointStreamFactory streamFactory = createStreamFactory();
+        SharedStateRegistry sharedStateRegistry = new SharedStateRegistry();
+
+        MapStateDescriptor<Integer, String> kvId =
+                new MapStateDescriptor<>("id", Integer.class, String.class);
+
+        TypeSerializer<String> keySerializer = StringSerializer.INSTANCE;
+        TypeSerializer<VoidNamespace> namespaceSerializer = VoidNamespaceSerializer.INSTANCE;
+
+        CheckpointableKeyedStateBackend<String> backend =
+                createKeyedBackend(StringSerializer.INSTANCE);
+        try {
+            MapState<Integer, String> state =
+                    backend.getPartitionedState(
+                            VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
+            @SuppressWarnings("unchecked")
+            InternalKvState<String, VoidNamespace, Map<Integer, String>> kvState =
+                    (InternalKvState<String, VoidNamespace, Map<Integer, String>>) state;
+
+            // these are only available after the backend initialized the serializer
+            TypeSerializer<Integer> userKeySerializer = kvId.getKeySerializer();
+            TypeSerializer<String> userValueSerializer = kvId.getValueSerializer();
+
+            // some modifications to the state
+            backend.setCurrentKey("1");
+            TestCase.assertNull(state.get(1));
+            TestCase.assertNull(
+                    getSerializedMap(
+                            kvState,
+                            "1",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+            state.put(1, "1");
+            backend.setCurrentKey("2");
+            TestCase.assertNull(state.get(2));
+            TestCase.assertNull(
+                    getSerializedMap(
+                            kvState,
+                            "2",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+            state.put(2, "2");
+            // put entry with different userKeyOffset
+            backend.setCurrentKey("11");
+            state.put(11, "11");
+
+            backend.setCurrentKey("1");
+            assertTrue(state.contains(1));
+            assertEquals("1", state.get(1));
+            assertEquals(
+                    new HashMap<Integer, String>() {
+                        {
+                            put(1, "1");
+                        }
+                    },
+                    getSerializedMap(
+                            kvState,
+                            "1",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+            assertEquals(
+                    new HashMap<Integer, String>() {
+                        {
+                            put(11, "11");
+                        }
+                    },
+                    getSerializedMap(
+                            kvState,
+                            "11",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+            // make some more modifications
+            backend.setCurrentKey("1");
+            state.put(1, "101");
+            backend.setCurrentKey("2");
+            state.put(102, "102");
+            backend.setCurrentKey("3");
+            state.put(103, "103");
+            state.putAll(
+                    new HashMap<Integer, String>() {
+                        {
+                            put(1031, "1031");
+                            put(1032, "1032");
+                        }
+                    });
+            // validate the original state
+            backend.setCurrentKey("1");
+            assertEquals("101", state.get(1));
+            assertEquals(
+                    new HashMap<Integer, String>() {
+                        {
+                            put(1, "101");
+                        }
+                    },
+                    getSerializedMap(
+                            kvState,
+                            "1",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+            backend.setCurrentKey("2");
+            assertEquals("102", state.get(102));
+            assertEquals(
+                    new HashMap<Integer, String>() {
+                        {
+                            put(2, "2");
+                            put(102, "102");
+                        }
+                    },
+                    getSerializedMap(
+                            kvState,
+                            "2",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+            backend.setCurrentKey("3");
+            assertTrue(state.contains(103));
+            assertEquals("103", state.get(103));
+            assertEquals(
+                    new HashMap<Integer, String>() {
+                        {
+                            put(103, "103");
+                            put(1031, "1031");
+                            put(1032, "1032");
+                        }
+                    },
+                    getSerializedMap(
+                            kvState,
+                            "3",
+                            keySerializer,
+                            VoidNamespace.INSTANCE,
+                            namespaceSerializer,
+                            userKeySerializer,
+                            userValueSerializer));
+
+            List<Integer> keys = new ArrayList<>();
+            for (Integer key : state.keys()) {
+                keys.add(key);
+            }
+            List<Integer> expectedKeys = Arrays.asList(103, 1031, 1032);
+            assertEquals(keys.size(), expectedKeys.size());
+            keys.removeAll(expectedKeys);
+
+            List<String> values = new ArrayList<>();
+            for (String value : state.values()) {
+                values.add(value);
+            }
+            List<String> expectedValues = Arrays.asList("103", "1031", "1032");
+            assertEquals(values.size(), expectedValues.size());
+            values.removeAll(expectedValues);
+        } finally {
+            IOUtils.closeQuietly(backend);
+            backend.dispose();
+        }
+    }
+    /** Returns the value by getting the serialized value and deserializing it if it is not null. */
+    private static <UK, UV, K, N> Map<UK, UV> getSerializedMap(
+            InternalKvState<K, N, Map<UK, UV>> kvState,
+            K key,
+            TypeSerializer<K> keySerializer,
+            N namespace,
+            TypeSerializer<N> namespaceSerializer,
+            TypeSerializer<UK> userKeySerializer,
+            TypeSerializer<UV> userValueSerializer)
+            throws Exception {
+
+        byte[] serializedKeyAndNamespace =
+                KvStateSerializer.serializeKeyAndNamespace(
+                        key, keySerializer, namespace, namespaceSerializer);
+
+        byte[] serializedValue =
+                kvState.getSerializedValue(
+                        serializedKeyAndNamespace,
+                        kvState.getKeySerializer(),
+                        kvState.getNamespaceSerializer(),
+                        kvState.getValueSerializer());
+
+        if (serializedValue == null) {
+            return null;
+        } else {
+            return KvStateSerializer.deserializeMap(
+                    serializedValue, userKeySerializer, userValueSerializer);
         }
     }
 

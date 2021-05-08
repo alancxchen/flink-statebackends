@@ -159,8 +159,6 @@ public abstract class AbstractMemoryMappedState<K, N, V>
         return dataOutputView.getCopyOfBuffer();
     }
 
-
-
     public Tuple2<byte[], String> getNamespaceKeyStateNameTuple() throws Exception {
         byte[] serializedKeyAndNamespace =
                 getSharedKeyNamespaceSerializer()

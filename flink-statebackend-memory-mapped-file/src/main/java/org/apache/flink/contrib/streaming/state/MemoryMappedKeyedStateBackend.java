@@ -82,9 +82,9 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
                             Tuple2.of(
                                     ValueStateDescriptor.class,
                                     (StateFactory) MemoryMappedValueState::create),
-                    Tuple2.of(
-                            MapStateDescriptor.class,
-                            (StateFactory) MemoryMappedMapState::create))
+                            Tuple2.of(
+                                    MapStateDescriptor.class,
+                                    (StateFactory) MemoryMappedMapState::create))
                     .collect(Collectors.toMap(t -> t.f0, t -> t.f1));
 
     private interface StateFactory {

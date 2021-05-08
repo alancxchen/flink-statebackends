@@ -24,7 +24,6 @@ import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.MapSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.queryablestate.client.state.serialization.KvStateSerializer;
 import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
 import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
@@ -40,6 +39,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.logging.Logger;
 
 /**
  * {@link MapState} implementation that stores state in a MemoryMappedFile.
@@ -51,6 +51,7 @@ import java.util.Map;
  */
 class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N, Map<UK, UV>>
         implements InternalMapState<K, N, UK, UV> {
+    private static Logger log = Logger.getLogger("memory mapped map state");
     /** Serializer for the keys and values. */
     private final TypeSerializer<UK> userKeySerializer;
 
@@ -107,10 +108,73 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
             byte[] serializedKeyAndNamespace,
             TypeSerializer<K> safeKeySerializer,
             TypeSerializer<N> safeNamespaceSerializer,
-            TypeSerializer<Map<UK, UV>> safeValueSerializer) throws Exception {
-        throw new FlinkRuntimeException("Not needed for Benchmarking");
+            TypeSerializer<Map<UK, UV>> safeValueSerializer)
+            throws Exception {
+        // Boilerplate
+        String stateName = backend.stateToStateName.get(this);
+        Tuple2<K, N> keyAndNamespace =
+                KvStateSerializer.deserializeKeyAndNamespace(
+                        serializedKeyAndNamespace, safeKeySerializer, safeNamespaceSerializer);
+
+        SerializedCompositeKeyBuilder<K> keyBuilder =
+                new SerializedCompositeKeyBuilder<>(
+                        safeKeySerializer, backend.getKeyGroupPrefixBytes(), 32);
+
+        try {
+            Map<UK, UV> value = getHashMap(keyAndNamespace.f0, keyAndNamespace.f1, keyBuilder);
+            final MapSerializer<UK, UV> serializer = (MapSerializer<UK, UV>) safeValueSerializer;
+
+            final TypeSerializer<UK> dupUserKeySerializer = serializer.getKeySerializer();
+            final TypeSerializer<UV> dupUserValueSerializer = serializer.getValueSerializer();
+
+            return KvStateSerializer.serializeMap(
+                    value.entrySet(), dupUserKeySerializer, dupUserValueSerializer);
+
+        } catch (Exception e) {
+            if (getDefaultValue() == null) {
+                return null;
+            }
+            dataOutputView.clear();
+            safeValueSerializer.serialize(getDefaultValue(), dataOutputView);
+            byte[] dv = dataOutputView.getCopyOfBuffer();
+            return dv;
+        }
+
+        //
+        //        throw new FlinkRuntimeException("Not needed for Benchmarking");
     }
 
+    private HashMap<UK, UV> getHashMap(
+            K key, N namespace, SerializedCompositeKeyBuilder<K> keyBuilder) throws IOException {
+        int keyGroup =
+                KeyGroupRangeAssignment.assignToKeyGroup(key, backend.getNumberOfKeyGroups());
+        keyBuilder.setKeyAndKeyGroup(key, keyGroup);
+
+        if (!keyToUserKeys.containsKey(key)) {
+            throw new FlinkRuntimeException("No entries for this key");
+        }
+        HashMap<UK, UV> map = new HashMap<>();
+        for (UK userkey : keyToUserKeys.get(key)) {
+
+            byte[] keyBytes =
+                    keyBuilder.buildCompositeKeyNamesSpaceUserKey(
+                            namespace, namespaceSerializer, userkey, userKeySerializer);
+            Tuple2<byte[], String> backendKey =
+                    new Tuple2<byte[], String>(keyBytes, getStateName());
+            if (!backend.namespaceKeyStatenameToValue.containsKey(backendKey)) {
+                throw new FlinkRuntimeException("no consistency between key and key set");
+            }
+            byte[] valueBytes = backend.namespaceKeyStatenameToValue.get(backendKey);
+
+            dataInputView.setBuffer(valueBytes);
+
+            UV uservalue = userValueSerializer.deserialize(dataInputView);
+            map.put(userkey, uservalue);
+            log.info("key: " + userkey.toString() + " value: " + uservalue.toString());
+        }
+        log.info(map.toString());
+        return map;
+    }
 
     @SuppressWarnings("unchecked")
     static <UK, UV, K, N, SV, S extends State, IS extends S> IS create(
@@ -130,7 +194,11 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
     @Override
     public UV get(UK userkey) throws Exception {
         byte[] keyBytes = statekeyNamespaceUserkeyBytes(userkey);
-        byte[] valueBytes = backend.namespaceKeyStatenameToValue.get(new Tuple2<byte[], String> (keyBytes, getStateName()));
+        Tuple2<byte[], String> backendKey = new Tuple2<byte[], String>(keyBytes, getStateName());
+        if (!backend.namespaceKeyStatenameToValue.containsKey(backendKey)) {
+            return null;
+        }
+        byte[] valueBytes = backend.namespaceKeyStatenameToValue.get(backendKey);
 
         dataInputView.setBuffer(valueBytes);
 
@@ -142,28 +210,32 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
 
         Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
 
-//        if (!backend.namespaceKeyStatenameToValue.containsKey(namespaceKeyStateNameTuple)) {
-//            HashMap<UK, UV> entryMap = new HashMap<>();
-//            entryMap.put(userkey, uservalue);
-//            putValueInBackend(entryMap, namespaceKeyStateNameTuple);
-//        } else {
-//            byte[] serializedValue = backend.namespaceKeyStatenameToValue.get(namespaceKeyStateNameTuple);
-//            dataInputView.setBuffer(serializedValue);
-//            HashMap<UK, UV> entryMap = (HashMap<UK, UV>) valueSerializer.deserialize(dataInputView);
-//
-//            entryMap.put(userkey, uservalue);
-//            putValueInBackend(entryMap, namespaceKeyStateNameTuple);
-//        }
+        //        if (!backend.namespaceKeyStatenameToValue.containsKey(namespaceKeyStateNameTuple))
+        // {
+        //            HashMap<UK, UV> entryMap = new HashMap<>();
+        //            entryMap.put(userkey, uservalue);
+        //            putValueInBackend(entryMap, namespaceKeyStateNameTuple);
+        //        } else {
+        //            byte[] serializedValue =
+        // backend.namespaceKeyStatenameToValue.get(namespaceKeyStateNameTuple);
+        //            dataInputView.setBuffer(serializedValue);
+        //            HashMap<UK, UV> entryMap = (HashMap<UK, UV>)
+        // valueSerializer.deserialize(dataInputView);
+        //
+        //            entryMap.put(userkey, uservalue);
+        //            putValueInBackend(entryMap, namespaceKeyStateNameTuple);
+        //        }
 
-//        Put uservalue and userkey into the memory mapped file
+        //        Put uservalue and userkey into the memory mapped file
 
         byte[] keyBytes = statekeyNamespaceUserkeyBytes(userkey);
         dataOutputView.clear();
         userValueSerializer.serialize(uservalue, dataOutputView);
         byte[] valueBytes = dataOutputView.getCopyOfBuffer();
-        backend.namespaceKeyStatenameToValue.put(new Tuple2<byte[], String> (keyBytes, getStateName()), valueBytes);
+        backend.namespaceKeyStatenameToValue.put(
+                new Tuple2<byte[], String>(keyBytes, getStateName()), valueBytes);
 
-//        Handle backend logic
+        //        Handle backend logic
         putCurrentStateKeyInBackend();
 
         backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
@@ -171,7 +243,7 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
                 .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
                 .add(namespaceKeyStateNameTuple.f0);
 
-//       Keeping track of userkeys for each State Key
+        //       Keeping track of userkeys for each State Key
         K currentStateKey = backend.getCurrentKey();
         if (keyToUserKeys.containsKey(currentStateKey)) {
             keyToUserKeys.get(currentStateKey).add(userkey);
@@ -184,34 +256,35 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
 
     @Override
     public void putAll(Map<UK, UV> map) throws Exception {
-        for (Map.Entry<UK, UV> entry: map.entrySet()) {
+        for (Map.Entry<UK, UV> entry : map.entrySet()) {
             put(entry.getKey(), entry.getValue());
         }
-//        Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
-//        putValueInBackend((HashMap<UK, UV>) map, namespaceKeyStateNameTuple);
+        //        Tuple2<byte[], String> namespaceKeyStateNameTuple =
+        // getNamespaceKeyStateNameTuple();
+        //        putValueInBackend((HashMap<UK, UV>) map, namespaceKeyStateNameTuple);
 
-    // Backend Logic for State Key and Namespace
-//        putCurrentStateKeyInBackend();
+        // Backend Logic for State Key and Namespace
+        //        putCurrentStateKeyInBackend();
 
-//        backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
-//        backend.stateNamesToKeysAndNamespaces
-//                .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
-//                .add(namespaceKeyStateNameTuple.f0);
-////
-////       Keeping track of userkeys for each State Key
-//        K currentStateKey = backend.getCurrentKey();
-//        if (keyToUserKeys.containsKey(currentStateKey)) {
-//            for (Map.Entry<UK, UV> entry : map.entrySet()) {
-//                keyToUserKeys.get(currentStateKey).add(entry.getKey());
-//            }
-//
-//        } else {
-//            HashSet<UK> userkeySet = new HashSet<>();
-//            for (Map.Entry<UK, UV> entry : map.entrySet()) {
-//                userkeySet.add(entry.getKey());
-//            }
-//            keyToUserKeys.put(currentStateKey, userkeySet);
-//        }
+        //        backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
+        //        backend.stateNamesToKeysAndNamespaces
+        //                .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
+        //                .add(namespaceKeyStateNameTuple.f0);
+        ////
+        ////       Keeping track of userkeys for each State Key
+        //        K currentStateKey = backend.getCurrentKey();
+        //        if (keyToUserKeys.containsKey(currentStateKey)) {
+        //            for (Map.Entry<UK, UV> entry : map.entrySet()) {
+        //                keyToUserKeys.get(currentStateKey).add(entry.getKey());
+        //            }
+        //
+        //        } else {
+        //            HashSet<UK> userkeySet = new HashSet<>();
+        //            for (Map.Entry<UK, UV> entry : map.entrySet()) {
+        //                userkeySet.add(entry.getKey());
+        //            }
+        //            keyToUserKeys.put(currentStateKey, userkeySet);
+        //        }
 
     }
 
@@ -222,14 +295,15 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
         }
 
         byte[] serializedBackendKey = statekeyNamespaceUserkeyBytes(userkey);
-        backend.namespaceKeyStatenameToValue.remove(new Tuple2<> (serializedBackendKey, getStateName()));
+        backend.namespaceKeyStatenameToValue.remove(
+                new Tuple2<>(serializedBackendKey, getStateName()));
     }
 
     @Override
     public boolean contains(UK userkey) throws Exception {
         K currentKey = backend.getCurrentKey();
         if (!keyToUserKeys.containsKey(currentKey)) {
-           return false;
+            return false;
         }
         return keyToUserKeys.get(currentKey).contains(userkey);
     }
@@ -237,23 +311,24 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
     @Override
     public Iterable<Map.Entry<UK, UV>> entries() throws Exception {
         K currentKey = backend.getCurrentKey();
-        if (keyToUserKeys.containsKey(currentKey)) {
+        if (!keyToUserKeys.containsKey(currentKey)) {
             throw new FlinkRuntimeException("No entries for this key");
         }
         HashMap<UK, UV> iterable = new HashMap<>();
-        for (UK userkey: keyToUserKeys.get(currentKey)) {
+        for (UK userkey : keyToUserKeys.get(currentKey)) {
             UV uservalue = get(userkey);
             iterable.put(userkey, uservalue);
         }
         return iterable.entrySet();
     }
+
     public HashMap<UK, UV> getHashMap() throws Exception {
         K currentKey = backend.getCurrentKey();
-        if (keyToUserKeys.containsKey(currentKey)) {
+        if (!keyToUserKeys.containsKey(currentKey)) {
             throw new FlinkRuntimeException("No entries for this key");
         }
         HashMap<UK, UV> map = new HashMap<>();
-        for (UK userkey: keyToUserKeys.get(currentKey)) {
+        for (UK userkey : keyToUserKeys.get(currentKey)) {
             UV uservalue = get(userkey);
             map.put(userkey, uservalue);
         }
@@ -282,7 +357,9 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
     }
 
     public byte[] statekeyNamespaceUserkeyBytes(UK userkey) throws IOException {
-        return getSharedKeyNamespaceSerializer().buildCompositeKeyNamesSpaceUserKey(getCurrentNamespace(), namespaceSerializer, userkey, userKeySerializer);
+        return getSharedKeyNamespaceSerializer()
+                .buildCompositeKeyNamesSpaceUserKey(
+                        getCurrentNamespace(), namespaceSerializer, userkey, userKeySerializer);
     }
 
     public void putCurrentStateKeyInBackend() throws Exception {
@@ -290,20 +367,18 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
         Tuple2<ByteBuffer, String> tupleForKeys =
                 new Tuple2(ByteBuffer.wrap(currentNamespace), getStateName());
         HashSet<K> keyHash =
-                backend.namespaceAndStateNameToKeys.getOrDefault(
-                        tupleForKeys, new HashSet<K>());
+                backend.namespaceAndStateNameToKeys.getOrDefault(tupleForKeys, new HashSet<K>());
         keyHash.add(backend.getCurrentKey());
         backend.namespaceAndStateNameToKeys.put(tupleForKeys, keyHash);
     }
 
-    public void putValueInBackend(HashMap<UK, UV> value, Tuple2<byte[], String> namespaceKeyStateNameTuple) throws Exception {
+    public void putValueInBackend(
+            HashMap<UK, UV> value, Tuple2<byte[], String> namespaceKeyStateNameTuple)
+            throws Exception {
         dataOutputView.clear();
         valueSerializer.serialize(value, dataOutputView);
         byte[] serializedValue = dataOutputView.getCopyOfBuffer();
 
         backend.namespaceKeyStatenameToValue.put(namespaceKeyStateNameTuple, serializedValue);
     }
-
-
-
 }
