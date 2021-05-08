@@ -30,6 +30,8 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.contrib.streaming.state.EmbeddedRocksDBStateBackend;
+import org.apache.flink.contrib.streaming.state.MemoryMappedKeyedStateBackend;
+import org.apache.flink.contrib.streaming.state.MemoryMappedKeyedStateBackendBuilder;
 import org.apache.flink.contrib.streaming.state.RocksDBKeyedStateBackend;
 import org.apache.flink.contrib.streaming.state.RocksDBKeyedStateBackendBuilder;
 import org.apache.flink.contrib.streaming.state.RocksDBResourceContainer;
@@ -44,6 +46,7 @@ import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.runtime.state.LocalRecoveryConfig;
 import org.apache.flink.runtime.state.LocalRecoveryDirectoryProviderImpl;
+import org.apache.flink.runtime.state.TestLocalRecoveryConfig;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.runtime.state.heap.HeapKeyedStateBackend;
@@ -76,6 +79,9 @@ public class StateBackendBenchmarkUtils {
             case ROCKSDB:
                 rootDir = prepareDirectory(rootDirName, null);
                 return createRocksDBKeyedStateBackend(rootDir);
+            case MEMORY_MAPPED:
+                rootDir = prepareDirectory(rootDirName, null);
+                return createMemoryMappedKeyedStateBackend(rootDir);
             case BATCH_EXECUTION:
                 return createBatchExecutionStateBackend();
             default:
@@ -166,6 +172,37 @@ public class StateBackendBenchmarkUtils {
         return backendBuilder.build();
     }
 
+    private static MemoryMappedKeyedStateBackend<Long> createMemoryMappedKeyedStateBackend(
+            File rootDir) throws IOException {
+        File recoveryBaseDir = prepareDirectory(recoveryDirName, rootDir);
+        File dbPathFile = prepareDirectory(dbDirName, rootDir);
+        KeyGroupRange keyGroupRange = new KeyGroupRange(0, 1);
+        int numberOfKeyGroups = keyGroupRange.getNumberOfKeyGroups();
+        ExecutionConfig executionConfig = new ExecutionConfig();
+
+        MemoryMappedKeyedStateBackendBuilder<Long> builder =
+                new MemoryMappedKeyedStateBackendBuilder<>(
+                        "no-op",
+                        Thread.currentThread().getContextClassLoader(),
+                        //                        ClassLoader.getSystemClassLoader(),
+                        null,
+                        //                new KvStateRegistry().createTaskRegistry(new JobID(), new
+                        // JobVertexID()),
+                        new LongSerializer(),
+                        numberOfKeyGroups,
+                        keyGroupRange,
+                        executionConfig,
+                        TestLocalRecoveryConfig.disabled(),
+                        TtlTimeProvider.DEFAULT,
+                        LatencyTrackingStateConfig.disabled(),
+                        new UnregisteredMetricsGroup(),
+                        Collections.emptyList(),
+                        AbstractStateBackend.getCompressionDecorator(executionConfig),
+                        new CloseableRegistry());
+
+        return builder.build();
+    }
+
     private static File prepareDirectory(String prefix, File parentDir) throws IOException {
         File target = File.createTempFile(prefix, "", parentDir);
         if (target.exists() && !target.delete()) {
@@ -232,6 +269,7 @@ public class StateBackendBenchmarkUtils {
     public enum StateBackendType {
         HEAP,
         ROCKSDB,
+        MEMORY_MAPPED,
         BATCH_EXECUTION
     }
 }

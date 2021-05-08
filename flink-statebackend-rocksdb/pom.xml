@@ -81,6 +81,22 @@ under the License.
 			<type>test-jar</type>
 			<scope>test</scope>
 		</dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.apache.flink</groupId>-->
+<!--            <artifactId>flink-statebackend-memory-mapped-file_2.11</artifactId>-->
+<!--			<scope>system</scope>-->
+<!--			<systemPath>/Users/alan/Desktop/Senior/Second_Sem_Classes/Senior_Project/flink/flink-state-backends/flink-statebackend-memory-mapped-file/target/flink-statebackend-memory-mapped-file_2.11-1.13-SNAPSHOT.jar</systemPath>-->
+<!--            <version>${flink.version}</version>-->
+<!--        </dependency>-->
+
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-statebackend-memory-mapped-file_2.11</artifactId>
+
+			<version>1.13-SNAPSHOT</version>
+			<scope>system</scope>
+			<systemPath>/Users/alan/Desktop/Senior/Second_Sem_Classes/Senior_Project/flink/flink-state-backends/flink-statebackend-memory-mapped-file/target/flink-statebackend-memory-mapped-file_2.11-1.13-SNAPSHOT.jar</systemPath>
+		</dependency>
 	</dependencies>
 
 	<!-- build a test jar -->
