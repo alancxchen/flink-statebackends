@@ -111,8 +111,6 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
 
             //            Fixed bug where we were using the wrong tuple to update the keys
             byte[] currentNamespace = serializeCurrentNamespace();
-            Tuple2<byte[], String> namespaceStatenameTuple =
-                    new Tuple2(currentNamespace, getStateName());
 
             Tuple2<ByteBuffer, String> tupleForKeys =
                     new Tuple2(ByteBuffer.wrap(currentNamespace), getStateName());
@@ -120,7 +118,6 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
                     backend.namespaceAndStateNameToKeys.getOrDefault(
                             tupleForKeys, new HashSet<K>());
             keyHash.add(backend.getCurrentKey());
-            //            Trying out ByteBuffer
 
             backend.namespaceAndStateNameToKeys.put(tupleForKeys, keyHash);
 

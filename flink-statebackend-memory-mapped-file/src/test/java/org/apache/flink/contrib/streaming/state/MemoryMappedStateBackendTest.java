@@ -165,16 +165,11 @@ public class MemoryMappedStateBackendTest extends TestLogger {
         }
     }
 
-    //    @Override
     protected MemoryMappedStateBackend getStateBackend() throws IOException {
         dbPath = TEMP_FOLDER.newFolder().getAbsolutePath();
         MemoryMappedStateBackend backend = new MemoryMappedStateBackend();
         Configuration configuration = new Configuration();
-        //        configuration.set(
-        //                RocksDBOptions.TIMER_SERVICE_FACTORY,
-        //                EmbeddedRocksDBStateBackend.PriorityQueueStateType.ROCKSDB);
         backend = backend.configure(configuration, Thread.currentThread().getContextClassLoader());
-        //        backend.setDbStoragePath(dbPath);
         return backend;
     }
 
@@ -211,21 +206,6 @@ public class MemoryMappedStateBackendTest extends TestLogger {
                                 new CloseableRegistry());
 
         return backend;
-    }
-
-    //    @Override
-    protected CheckpointStorage getCheckpointStorage() throws Exception {
-        return storageSupplier.get();
-    }
-
-    //    @Override
-    protected boolean isSerializerPresenceRequiredOnRestore() {
-        return false;
-    }
-
-    //    @Override
-    protected boolean supportsAsynchronousSnapshots() {
-        return true;
     }
 
     @Test
@@ -350,7 +330,7 @@ public class MemoryMappedStateBackendTest extends TestLogger {
 
     @Test
     public void testGetKeys() throws Exception {
-        final int namespace1ElementsNum = 1000;
+        final int namespace1ElementsNum = 500000;
         final int namespace2ElementsNum = 1000;
         String fieldName = "get-keys-test";
         CheckpointableKeyedStateBackend<Integer> backend =

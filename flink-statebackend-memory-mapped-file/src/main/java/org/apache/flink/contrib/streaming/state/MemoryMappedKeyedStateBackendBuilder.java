@@ -3,8 +3,10 @@ package org.apache.flink.contrib.streaming.state;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.State;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.fs.CloseableRegistry;
+import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.query.TaskKvStateRegistry;
 import org.apache.flink.runtime.state.AbstractKeyedStateBackendBuilder;
@@ -64,14 +66,6 @@ import java.util.LinkedHashMap;
 public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateBackendBuilder<K> {
     /** String that identifies the operator that owns this backend. */
     private final String operatorIdentifier;
-
-    //    private final EmbeddedRocksDBStateBackend.PriorityQueueStateType priorityQueueStateType;
-
-    //    /** Path where this configured instance stores its data directory. */
-    //    private final File instanceBasePath;
-
-    //    /** Path where this configured instance stores its RocksDB database. */
-    //    private final File instanceRocksDBPath;
     private final MetricGroup metricGroup;
     private static int numKeyedStatesBuilt = 0;
     /** True if incremental checkpointing is enabled. */
@@ -109,8 +103,6 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
 
         this.operatorIdentifier = operatorIdentifier;
         this.numKeyedStatesBuilt += 1;
-        //        this.instanceBasePath = instanceBasePath;
-        //        this.instanceRocksDBPath = new File(instanceBasePath, DB_INSTANCE_DIR_STRING);
         this.metricGroup = metricGroup;
         this.enableIncrementalCheckpointing = false;
     }
@@ -150,11 +142,7 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
              * Creating all the Chronicle Maps
              * */
             String[] fileNames = {
-                //                "/namespaceAndStateNameToKeys",
-                //                "/namespaceStateNameKeyToState",
-                //                "/stateNamesToKeysAndNamespaces",
                 "/namespaceKeyStateNameToValue",
-                //                "/stateNameToState"
             };
             int[] averageValueSizes = {50, 500, 500, 5, 500};
 
@@ -174,85 +162,36 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                 files[i].getParentFile().mkdirs();
                 files[i].delete();
                 files[i].createNewFile();
-                //                if (files[i].createNewFile()) {
-                ////                    System.out.println("File Created" + files[i].getName());
-                //                } else {
-                //                    System.out.println(("File already Exists"));
-                //                }
-            }
 
-            Tuple2<byte[], String> byteArrayStringTuple =
-                    new Tuple2<byte[], String>("Any String you want".getBytes(), "123");
-            HashSet<K> keyHashSet = new HashSet<K>();
-            byte[] byteArray = "Any String you want".getBytes();
-            HashSet<byte[]> byteHashSet = new HashSet<byte[]>();
+            }
+            DataOutputSerializer dataOutput = new DataOutputSerializer(32);
+            LongSerializer l = new LongSerializer();
+            l.serialize((long) 250000, dataOutput);
+            Tuple2<byte[], String> averageKey =
+                    new Tuple2<>(dataOutput.getCopyOfBuffer(), "kvState");
 
             int count = 0;
-            // !!! Does this way of opening files work
-            //            namespaceAndStateNameToKeys =
-            //                    ChronicleMapBuilder.of(
-            //                                    (Class<Tuple2<byte[], String>>)
-            // byteArrayStringTuple.getClass(),
-            //                                    (Class<HashSet<K>>) keyHashSet.getClass())
-            //                            .name("name-and-state-name-to-keys-map")
-            //                            .averageKey(byteArrayStringTuple)
-            //                            .averageValueSize(averageValueSizes[count])
-            //                            .entries(50_000)
-            //                            .createPersistedTo(files[count++]);
             namespaceAndStateNameToKeys = new LinkedHashMap<>();
             namespaceStateNameKeyToState = new LinkedHashMap<>();
-            //            namespaceStateNameKey ToState =
-            //                    ChronicleMapBuilder.of(
-            //                                    (Class<Tuple2<byte[], String>>)
-            // byteArrayStringTuple.getClass(),
-            //                                    State.class)
-            //                            .name("name-state_name-key-to-state-map")
-            //                            .averageKey(byteArrayStringTuple)
-            //                            .averageValueSize(averageValueSizes[count])
-            //                            .entries(50_000)
-            //                            .createPersistedTo(files[count++]);
-
             stateNamesToKeysAndNamespaces = new LinkedHashMap<>();
-            //                    ChronicleMapBuilder.of(
-            //                                    String.class, (Class<HashSet<byte[]>>)
-            // byteHashSet.getClass())
-            //                            .name("state_name-to-keys-and-namespaces-map")
-            //                            .averageKey("Any String you want")
-            //                            .averageValueSize(averageValueSizes[count])
-            //                            .entries(50_000)
-            //                            .createPersistedTo(files[count++]);
-
             stateToStateName = new LinkedHashMap<State, String>();
 
             namespaceKeyStateNameToValue =
                     ChronicleMapBuilder.of(
-                                    (Class<Tuple2<byte[], String>>) byteArrayStringTuple.getClass(),
+                                    (Class<Tuple2<byte[], String>>) averageKey.getClass(),
                                     byte[].class)
                             .name("name-and-state-to-keys-map")
-                            .averageKey(byteArrayStringTuple)
+                            .averageKey(averageKey)
                             .averageValueSize(averageValueSizes[count])
-                            .entries(50_000)
+                            .entries(1_000_000)
                             .createPersistedTo(files[count++]);
             stateNameToState = new LinkedHashMap<String, State>();
-            //            stateNameToState =
-            //                    ChronicleMapBuilder.of(String.class, State.class)
-            //                            .name("state_name-to-state-map")
-            //                            .averageKey("Any String you want")
-            //                            .averageValueSize(averageValueSizes[count])
-            //                            .entries(50_000)
-            //                            .createPersistedTo(files[count++]);
 
         } catch (Throwable e) {
             // Do clean up
             IOUtils.closeQuietly(cancelStreamRegistryForBackend);
             kvStateInformation.clear();
-            //            try {
-            //                FileUtils.deleteDirectory(instanceBasePath);
-            //            } catch (Exception ex) {
-            //                logger.warn("Failed to delete base path for MemoryMappedFile: " +
-            // instanceBasePath, ex);
-            //            }
-            // Log and rethrow
+
             if (e instanceof BackendBuildingException) {
                 throw (BackendBuildingException) e;
             } else {
@@ -278,7 +217,6 @@ public class MemoryMappedKeyedStateBackendBuilder<K> extends AbstractKeyedStateB
                 cancelStreamRegistryForBackend,
                 this.keyGroupCompressionDecorator,
                 sharedKeyBuilder,
-                //                priorityQueueFactory,
                 keyContext,
                 namespaceAndStateNameToKeys,
                 namespaceStateNameKeyToState,
