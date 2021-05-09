@@ -36,8 +36,7 @@ import net.openhft.chronicle.map.ChronicleMapBuilder;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Array;
-import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Logger;
 
 /**
@@ -50,8 +49,9 @@ import java.util.logging.Logger;
 class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         implements InternalValueState<K, N, V> {
     private static Logger log = Logger.getLogger("mmf value state");
-    private ChronicleMap<Tuple2<K, N>, V> kvStore;
+    private ChronicleMap<K, V> kvStore;
     private static int numKeyedStatesBuilt = 0;
+    private boolean chronicleMapInitialized = false;
     private String className = "MemoryMappedValueState";
     /**
      * Creates a new {@code MemoryMappedValueState}.
@@ -70,43 +70,53 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             throws IOException {
 
         super(namespaceSerializer, valueSerializer, keySerializer, defaultValue, backend);
+    }
+
+    public void setUpChronicleMap() throws IOException {
         this.kvStore = createChronicleMap();
     }
 
-    private ChronicleMap<Tuple2<K, N>, V> createChronicleMap() throws IOException {
+    private ChronicleMap<K, V> createChronicleMap() throws IOException {
         String[] filePrefixes = {
             "namespaceKeyStateNameToValue",
         };
         File[] files = createPersistedFiles(filePrefixes);
 
-        Tuple2<K, N> dv = (Tuple2<K, N>) Array.get(Array.newInstance(Tuple2.class, 1), 0);
-
-        Tuple2<K, V> dv2 = (Tuple2<K, V>) Array.get(Array.newInstance(Tuple2.class, 1), 0);
         numKeyedStatesBuilt += 1;
         N averageNamespace = (N) VoidNamespace.INSTANCE;
+        ChronicleMapBuilder<K, V> cmapBuilder =
+                ChronicleMapBuilder.of(
+                                (Class<K>) backend.getCurrentKey().getClass(),
+                                (Class<V>) valueSerializer.createInstance().getClass())
+                        .name("key-and-namespace-to-values")
+                        .entries(1_000_000);
+        if (backend.getCurrentKey() instanceof Integer || backend.getCurrentKey() instanceof Long) {
+            log.info("Key is an Int or Long");
+            //            return ChronicleMapBuilder.of(
+            //                            (Class<K>) backend.getCurrentKey().getClass(),
+            //                            (Class<V>) valueSerializer.createInstance().getClass())
+            //                    .name("key-and-namespace-to-values")
+            //                    .entries(1_000_000)
+            //                    .createPersistedTo(files[0]);
+        } else {
+            cmapBuilder.averageKeySize(64);
+        }
+
         if (valueSerializer.createInstance() instanceof Integer
                 || valueSerializer.createInstance() instanceof Long) {
-            log.info("Is an Int or Long");
-            return ChronicleMapBuilder.of(
-                            (Class<Tuple2<K, N>>)
-                                    new Tuple2<K, N>(backend.getCurrentKey(), getCurrentNamespace())
-                                            .getClass(),
-                            (Class<V>) valueSerializer.createInstance().getClass())
-                    .name("key-and-namespace-to-values")
-                    .averageKeySize(64)
-                    .entries(1_000_000)
-                    .createPersistedTo(files[0]);
+            log.info("Value is an Int or Long");
+        } else {
+            cmapBuilder.averageValue(valueSerializer.createInstance());
         }
-        return ChronicleMapBuilder.of(
-                        (Class<Tuple2<K, N>>)
-                                new Tuple2<K, N>(backend.getCurrentKey(), getCurrentNamespace())
-                                        .getClass(),
-                        (Class<V>) valueSerializer.createInstance().getClass())
-                .name("key-and-namespace-to-values")
-                .averageKeySize(64)
-                .averageValue(valueSerializer.createInstance())
-                .entries(1_000_000)
-                .createPersistedTo(files[0]);
+        return cmapBuilder.createPersistedTo(files[0]);
+        //        return ChronicleMapBuilder.of(
+        //                        (Class<K>) backend.getCurrentKey().getClass(),
+        //                        (Class<V>) valueSerializer.createInstance().getClass())
+        //                .name("key-and-namespace-to-values")
+        //                .averageKeySize(64)
+        //                .averageValue(valueSerializer.createInstance())
+        //                .entries(1_000_000)
+        //                .createPersistedTo(files[0]);
     }
 
     private File[] createPersistedFiles(String[] filePrefixes) throws IOException {
@@ -152,20 +162,17 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
     }
 
     @Override
-    public HashSet<K> getKeys(N n) {
-        HashSet<K> result = new HashSet<>();
-        for (Tuple2<K, N> backendKey : kvStore.keySet()) {
-            if (backendKey.f1 == n) {
-                result.add(backendKey.f0);
-            }
-        }
-        return result;
+    public Set<K> getKeys(N n) {
+        return kvStore.keySet();
     }
 
     @Override
-    public V value() {
-
-        Tuple2<K, N> backendKey = getBackendKey();
+    public V value() throws IOException {
+        if (!this.chronicleMapInitialized) {
+            setUpChronicleMap();
+            this.chronicleMapInitialized = true;
+        }
+        K backendKey = backend.getCurrentKey();
         if (!kvStore.containsKey(backendKey)) {
             return defaultValue;
         }
@@ -190,13 +197,17 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
     }
 
     @Override
-    public void update(V value) {
+    public void update(V value) throws IOException {
+        if (!this.chronicleMapInitialized) {
+            setUpChronicleMap();
+            this.chronicleMapInitialized = true;
+        }
         if (value == null) {
-            kvStore.remove(getBackendKey());
+            kvStore.remove(backend.getCurrentKey());
             return;
         }
 
-        this.kvStore.put(getBackendKey(), value);
+        this.kvStore.put(backend.getCurrentKey(), value);
 
         //        try {
         //            byte[] serializedValue = serializeValue(value, valueSerializer);
@@ -247,8 +258,8 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
                         safeKeySerializer, backend.getKeyGroupPrefixBytes(), 32);
         keyBuilder.setKeyAndKeyGroup(keyAndNamespace.f0, keyGroup);
         byte[] key = keyBuilder.buildCompositeKeyNamespace(keyAndNamespace.f1, namespaceSerializer);
-        if (kvStore.containsKey(keyAndNamespace)) {
-            V value = kvStore.get(keyAndNamespace);
+        if (kvStore.containsKey(keyAndNamespace.f0)) {
+            V value = kvStore.get(keyAndNamespace.f0);
             dataOutputView.clear();
             safeValueSerializer.serialize(value, dataOutputView);
             return dataOutputView.getCopyOfBuffer();

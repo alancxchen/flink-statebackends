@@ -39,6 +39,7 @@ import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.Spliterator;
 import java.util.concurrent.RunnableFuture;
 import java.util.logging.Logger;
@@ -162,7 +163,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
             if (s instanceof AbstractMemoryMappedState) {
                 AbstractMemoryMappedState<K, N, ?> astate =
                         ((AbstractMemoryMappedState<K, N, ?>) s);
-                HashSet<K> keys = astate.getKeys(namespace);
+                Set<K> keys = astate.getKeys(namespace);
                 Spliterator<K> keySpliterator = keys.spliterator();
                 Stream<K> targetStream = StreamSupport.stream(keySpliterator, false);
                 return targetStream;
