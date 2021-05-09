@@ -29,7 +29,6 @@ import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
 import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.internal.InternalValueState;
-import org.apache.flink.util.FlinkRuntimeException;
 
 import net.openhft.chronicle.core.OS;
 import net.openhft.chronicle.map.ChronicleMap;
@@ -38,7 +37,6 @@ import net.openhft.chronicle.map.ChronicleMapBuilder;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Array;
-import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.logging.Logger;
 
@@ -73,10 +71,6 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
 
         super(namespaceSerializer, valueSerializer, keySerializer, defaultValue, backend);
         this.kvStore = createChronicleMap();
-    }
-
-    private static <T> T getDefaultVal(Class<T> clazz) {
-        return (T) Array.get(Array.newInstance(clazz, 1), 0);
     }
 
     private ChronicleMap<Tuple2<K, N>, V> createChronicleMap() throws IOException {
@@ -158,51 +152,79 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
     }
 
     @Override
-    public V value() {
-        try {
-            byte[] valueBytes =
-                    backend.namespaceKeyStatenameToValue.get(getNamespaceKeyStateNameTuple());
-            if (valueBytes == null) {
-                return getDefaultValue();
+    public HashSet<K> getKeys(N n) {
+        HashSet<K> result = new HashSet<>();
+        for (Tuple2<K, N> backendKey : kvStore.keySet()) {
+            if (backendKey.f1 == n) {
+                result.add(backendKey.f0);
             }
-            dataInputView.setBuffer(valueBytes);
-            return valueSerializer.deserialize(dataInputView);
-        } catch (java.lang.Exception e) {
-            throw new FlinkRuntimeException(
-                    "Error while retrieving data from Memory Mapped File.", e);
         }
+        return result;
+    }
+
+    @Override
+    public V value() {
+
+        Tuple2<K, N> backendKey = getBackendKey();
+        if (!kvStore.containsKey(backendKey)) {
+            return defaultValue;
+        }
+        return this.kvStore.get(backendKey);
+        //        try {
+        //            byte[] valueBytes =
+        //
+        // backend.namespaceKeyStatenameToValue.get(getNamespaceKeyStateNameTuple());
+        //            if (valueBytes == null) {
+        //                return getDefaultValue();
+        //            }
+        //            dataInputView.setBuffer(valueBytes);
+        //            return valueSerializer.deserialize(dataInputView);
+        //        } catch (java.lang.Exception e) {
+        //            throw new FlinkRuntimeException(
+        //                    "Error while retrieving data from Memory Mapped File.", e);
+        //        }
+    }
+
+    Tuple2<K, N> getBackendKey() {
+        return new Tuple2<K, N>(backend.getCurrentKey(), getCurrentNamespace());
     }
 
     @Override
     public void update(V value) {
         if (value == null) {
-            clear();
+            kvStore.remove(getBackendKey());
             return;
         }
-        try {
-            byte[] serializedValue = serializeValue(value, valueSerializer);
-            Tuple2<byte[], String> namespaceKeyStateNameTuple = getNamespaceKeyStateNameTuple();
-            backend.namespaceKeyStatenameToValue.put(namespaceKeyStateNameTuple, serializedValue);
 
-            //            Fixed bug where we were using the wrong tuple to update the keys
-            byte[] currentNamespace = serializeCurrentNamespace();
+        this.kvStore.put(getBackendKey(), value);
 
-            Tuple2<ByteBuffer, String> tupleForKeys =
-                    new Tuple2(ByteBuffer.wrap(currentNamespace), getStateName());
-            HashSet<K> keyHash =
-                    backend.namespaceAndStateNameToKeys.getOrDefault(
-                            tupleForKeys, new HashSet<K>());
-            keyHash.add(backend.getCurrentKey());
-
-            backend.namespaceAndStateNameToKeys.put(tupleForKeys, keyHash);
-
-            backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
-            backend.stateNamesToKeysAndNamespaces
-                    .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
-                    .add(namespaceKeyStateNameTuple.f0);
-        } catch (java.lang.Exception e) {
-            throw new FlinkRuntimeException("Error while adding data to Memory Mapped File", e);
-        }
+        //        try {
+        //            byte[] serializedValue = serializeValue(value, valueSerializer);
+        //            Tuple2<byte[], String> namespaceKeyStateNameTuple =
+        // getNamespaceKeyStateNameTuple();
+        //            backend.namespaceKeyStatenameToValue.put(namespaceKeyStateNameTuple,
+        // serializedValue);
+        //
+        //            //            Fixed bug where we were using the wrong tuple to update the keys
+        //            byte[] currentNamespace = serializeCurrentNamespace();
+        //
+        //            Tuple2<ByteBuffer, String> tupleForKeys =
+        //                    new Tuple2(ByteBuffer.wrap(currentNamespace), getStateName());
+        //            HashSet<K> keyHash =
+        //                    backend.namespaceAndStateNameToKeys.getOrDefault(
+        //                            tupleForKeys, new HashSet<K>());
+        //            keyHash.add(backend.getCurrentKey());
+        //
+        //            backend.namespaceAndStateNameToKeys.put(tupleForKeys, keyHash);
+        //
+        //            backend.namespaceKeyStateNameToState.put(namespaceKeyStateNameTuple, this);
+        //            backend.stateNamesToKeysAndNamespaces
+        //                    .getOrDefault(namespaceKeyStateNameTuple.f1, new HashSet<byte[]>())
+        //                    .add(namespaceKeyStateNameTuple.f0);
+        //        } catch (java.lang.Exception e) {
+        //            throw new FlinkRuntimeException("Error while adding data to Memory Mapped
+        // File", e);
+        //        }
     }
 
     @Override
@@ -225,16 +247,22 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
                         safeKeySerializer, backend.getKeyGroupPrefixBytes(), 32);
         keyBuilder.setKeyAndKeyGroup(keyAndNamespace.f0, keyGroup);
         byte[] key = keyBuilder.buildCompositeKeyNamespace(keyAndNamespace.f1, namespaceSerializer);
+        if (kvStore.containsKey(keyAndNamespace)) {
+            V value = kvStore.get(keyAndNamespace);
+            dataOutputView.clear();
+            safeValueSerializer.serialize(value, dataOutputView);
+            return dataOutputView.getCopyOfBuffer();
+        }
 
         dataOutputView.clear();
         safeValueSerializer.serialize(getDefaultValue(), dataOutputView);
         byte[] defaultValue = dataOutputView.getCopyOfBuffer();
+        return defaultValue;
+        //
+        //        byte[] value =
+        //                backend.namespaceKeyStatenameToValue.getOrDefault(
+        //                        new Tuple2<byte[], String>(key, stateName), defaultValue);
 
-        byte[] value =
-                backend.namespaceKeyStatenameToValue.getOrDefault(
-                        new Tuple2<byte[], String>(key, stateName), defaultValue);
-
-        return value;
     }
 
     @SuppressWarnings("unchecked")

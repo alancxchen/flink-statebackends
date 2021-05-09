@@ -81,6 +81,11 @@ class MemoryMappedMapState<K, N, UK, UV> extends AbstractMemoryMappedState<K, N,
     }
 
     @Override
+    public HashSet<K> getKeys(N n) {
+        return null;
+    }
+
+    @Override
     public TypeSerializer<K> getKeySerializer() {
         return backend.getKeySerializer();
     }
