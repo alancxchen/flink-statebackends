@@ -73,6 +73,7 @@ public class MemoryMappedKeyedStateBackend<K> extends AbstractKeyedStateBackend<
     private K currentKey;
     private int keyGroupPrefixBytes;
     private boolean disposed = false;
+
     /** The key serializer. */
     protected final TypeSerializer<K> keySerializer;
 

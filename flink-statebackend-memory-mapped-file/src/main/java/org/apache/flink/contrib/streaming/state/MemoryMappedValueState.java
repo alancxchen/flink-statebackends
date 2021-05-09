@@ -27,14 +27,23 @@ import org.apache.flink.queryablestate.client.state.serialization.KvStateSeriali
 import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
 import org.apache.flink.runtime.state.RegisteredKeyValueStateBackendMetaInfo;
 import org.apache.flink.runtime.state.SerializedCompositeKeyBuilder;
+import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.internal.InternalValueState;
 import org.apache.flink.util.FlinkRuntimeException;
 
+import net.openhft.chronicle.core.OS;
+import net.openhft.chronicle.map.ChronicleMap;
+import net.openhft.chronicle.map.ChronicleMapBuilder;
+
+import java.io.File;
+import java.io.IOException;
+import java.lang.reflect.Array;
 import java.nio.ByteBuffer;
 import java.util.HashSet;
+import java.util.logging.Logger;
 
 /**
- * {@link ValueState} implementation that stores state in RocksDB.
+ * {@link ValueState} implementation that stores state in a Memory Mapped File.
  *
  * @param <K> The type of the key.
  * @param <N> The type of the namespace.
@@ -42,7 +51,10 @@ import java.util.HashSet;
  */
 class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
         implements InternalValueState<K, N, V> {
-
+    private static Logger log = Logger.getLogger("mmf value state");
+    private ChronicleMap<Tuple2<K, N>, V> kvStore;
+    private static int numKeyedStatesBuilt = 0;
+    private String className = "MemoryMappedValueState";
     /**
      * Creates a new {@code MemoryMappedValueState}.
      *
@@ -56,9 +68,72 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             TypeSerializer<V> valueSerializer,
             TypeSerializer<K> keySerializer,
             V defaultValue,
-            MemoryMappedKeyedStateBackend<K> backend) {
+            MemoryMappedKeyedStateBackend<K> backend)
+            throws IOException {
 
         super(namespaceSerializer, valueSerializer, keySerializer, defaultValue, backend);
+        this.kvStore = createChronicleMap();
+    }
+
+    private static <T> T getDefaultVal(Class<T> clazz) {
+        return (T) Array.get(Array.newInstance(clazz, 1), 0);
+    }
+
+    private ChronicleMap<Tuple2<K, N>, V> createChronicleMap() throws IOException {
+        String[] filePrefixes = {
+            "namespaceKeyStateNameToValue",
+        };
+        File[] files = createPersistedFiles(filePrefixes);
+
+        Tuple2<K, N> dv = (Tuple2<K, N>) Array.get(Array.newInstance(Tuple2.class, 1), 0);
+
+        Tuple2<K, V> dv2 = (Tuple2<K, V>) Array.get(Array.newInstance(Tuple2.class, 1), 0);
+        numKeyedStatesBuilt += 1;
+        N averageNamespace = (N) VoidNamespace.INSTANCE;
+        if (valueSerializer.createInstance() instanceof Integer
+                || valueSerializer.createInstance() instanceof Long) {
+            log.info("Is an Int or Long");
+            return ChronicleMapBuilder.of(
+                            (Class<Tuple2<K, N>>)
+                                    new Tuple2<K, N>(backend.getCurrentKey(), getCurrentNamespace())
+                                            .getClass(),
+                            (Class<V>) valueSerializer.createInstance().getClass())
+                    .name("key-and-namespace-to-values")
+                    .averageKeySize(64)
+                    .entries(1_000_000)
+                    .createPersistedTo(files[0]);
+        }
+        return ChronicleMapBuilder.of(
+                        (Class<Tuple2<K, N>>)
+                                new Tuple2<K, N>(backend.getCurrentKey(), getCurrentNamespace())
+                                        .getClass(),
+                        (Class<V>) valueSerializer.createInstance().getClass())
+                .name("key-and-namespace-to-values")
+                .averageKeySize(64)
+                .averageValue(valueSerializer.createInstance())
+                .entries(1_000_000)
+                .createPersistedTo(files[0]);
+    }
+
+    private File[] createPersistedFiles(String[] filePrefixes) throws IOException {
+        File[] files = new File[filePrefixes.length];
+        for (int i = 0; i < filePrefixes.length; i++) {
+            files[i] =
+                    new File(
+                            OS.getTarget()
+                                    + "/BackendChronicleMaps/"
+                                    + this.className
+                                    + "/"
+                                    + filePrefixes[i]
+                                    + "_"
+                                    + Integer.toString(this.numKeyedStatesBuilt)
+                                    + ".dat");
+
+            files[i].getParentFile().mkdirs();
+            files[i].delete();
+            files[i].createNewFile();
+        }
+        return files;
     }
 
     @Override
@@ -167,7 +242,8 @@ class MemoryMappedValueState<K, N, V> extends AbstractMemoryMappedState<K, N, V>
             StateDescriptor<S, SV> stateDesc,
             RegisteredKeyValueStateBackendMetaInfo<NS, SV> registerResult,
             TypeSerializer<K> keySerializer,
-            MemoryMappedKeyedStateBackend<K> backend) {
+            MemoryMappedKeyedStateBackend<K> backend)
+            throws IOException {
         return (IS)
                 new MemoryMappedValueState<>(
                         registerResult.getNamespaceSerializer(),

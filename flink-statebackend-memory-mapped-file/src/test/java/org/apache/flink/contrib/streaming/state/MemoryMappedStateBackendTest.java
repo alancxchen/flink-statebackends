@@ -214,7 +214,7 @@ public class MemoryMappedStateBackendTest extends TestLogger {
         return backend;
     }
 
-    //    @Test
+    @Test
     @SuppressWarnings("unchecked")
     public void testValueState2() throws Exception {
         //        CheckpointStreamFactory streamFactory = createStreamFactory();
@@ -402,7 +402,7 @@ public class MemoryMappedStateBackendTest extends TestLogger {
         }
     }
 
-    @Test
+    //    @Test
     @SuppressWarnings("unchecked,rawtypes")
     public void testMapState() throws Exception {
         //        CheckpointStreamFactory streamFactory = createStreamFactory();
